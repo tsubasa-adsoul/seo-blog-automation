@@ -505,6 +505,7 @@ def main():
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
+                key="data_editor",  # ← キーを追加
                 column_config={
                     "選択": st.column_config.CheckboxColumn(
                         "選択",
@@ -532,6 +533,11 @@ def main():
                     ),
                 }
             )
+        # 自動保存機能（データが変更されたら即座に保存）
+        if edited_df is not None and not df.equals(edited_df):
+            if update_sheet_immediately(project_info['worksheet'], edited_df):
+                st.success("✅ 変更を自動保存しました", icon="💾")
+                st.rerun()  # 画面を更新
             
             # 投稿ボタン
             col1, col2, col3 = st.columns([1, 1, 3])
@@ -655,5 +661,6 @@ def main():
 # ========================
 if __name__ == "__main__":
     main()
+
 
 
