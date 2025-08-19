@@ -149,12 +149,26 @@ def check_authentication():
 @st.cache_resource
 def get_sheets_client():
     """Google Sheetsクライアントを取得"""
+    import json
+    import tempfile
+    
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_service_account_info(
-        st.secrets.gcp.to_dict(),
-        scope
-    )
-    return gspread.authorize(creds)
+    
+    # Secretsから認証情報を取得してファイルに書き込み
+    creds_dict = st.secrets.gcp.to_dict()
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(creds_dict, f)
+        temp_creds_file = f.name
+    
+    creds = ServiceAccountCredentials.from_json_keyfile_name(temp_creds_file, scope)
+    client = gspread.authorize(creds)
+    
+    # 一時ファイルを削除
+    import os
+    os.unlink(temp_creds_file)
+    
+    return client
 
 def load_sheet_data(worksheet_name: str) -> pd.DataFrame:
     """スプレッドシートからデータを読み込み"""
@@ -623,3 +637,4 @@ def main():
 # ========================
 if __name__ == "__main__":
     main()
+
