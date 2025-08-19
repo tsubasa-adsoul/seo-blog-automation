@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 自動投稿実行スクリプト（GitHub Actions用）
+予約投稿対応版
 """
 
 import os
@@ -11,7 +12,7 @@ import time
 import random
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import requests
 import gspread
@@ -583,57 +584,186 @@ def post_to_wordpress_xmlrpc(article_data: Dict, site_config: Dict) -> str:
     return ""
 
 # ========================
-# 認証
+# 予約投稿関連機能（新規追加）
 # ========================
-def check_authentication():
-    """ユーザー認証"""
-    if not st.session_state.authenticated:
-        st.markdown("""
-        <style>
-        .auth-container {
-            max-width: 400px;
-            margin: auto;
-            padding: 2rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-        </style>
-        """, unsafe_allow_html=True)
+
+def check_and_execute_scheduled_posts():
+    """予約投稿をチェックして実行"""
+    logger.info("⏰ 予約投稿チェック開始")
+    client = get_sheets_client()
+    now = datetime.now()
+    
+    # 競合ドメインとその他リンクを事前に取得
+    competitor_domains = get_competitor_domains(client)
+    other_links = get_other_links(client)
+    
+    total_executed = 0
+    
+    for project_name, config in PROJECT_CONFIGS.items():
+        try:
+            logger.info(f"📊 {config['worksheet']} をチェック中...")
+            sheet = client.open_by_key(SPREADSHEET_ID).worksheet(config['worksheet'])
+            rows = sheet.get_all_values()
+            
+            if len(rows) <= 1:
+                logger.info(f"  📝 {config['worksheet']}: データなし")
+                continue
+            
+            executed_count = 0
+            
+            for row_idx, row in enumerate(rows[1:], start=2):
+                # ステータスが「予約済み」の行をチェック
+                if len(row) > 4 and row[4] == '予約済み':
+                    # K列以降（index 10以降）の予約時刻をチェック
+                    for col_idx in range(10, len(row)):
+                        if col_idx < len(row) and row[col_idx] and row[col_idx] not in ['', '完了']:
+                            try:
+                                scheduled_time = datetime.strptime(row[col_idx], '%Y/%m/%d %H:%M')
+                                
+                                # 現在時刻から30分以内の予約を実行
+                                if now <= scheduled_time <= now + timedelta(minutes=30):
+                                    logger.info(f"🚀 予約投稿実行: {config['worksheet']} 行{row_idx} - {scheduled_time}")
+                                    
+                                    success = execute_single_scheduled_post(
+                                        row, project_name, config, sheet, row_idx, 
+                                        competitor_domains, other_links
+                                    )
+                                    
+                                    if success:
+                                        # 予約時刻を「完了」に変更
+                                        sheet.update_cell(row_idx, col_idx + 1, "完了")
+                                        logger.info(f"✅ 予約投稿完了")
+                                        executed_count += 1
+                                        total_executed += 1
+                                        
+                                        # 連続投稿防止の待機
+                                        time.sleep(random.randint(60, 120))
+                                    else:
+                                        logger.error(f"❌ 予約投稿失敗")
+                                        
+                            except ValueError as e:
+                                logger.error(f"予約時刻解析エラー ({row[col_idx]}): {e}")
+                            except Exception as e:
+                                logger.error(f"予約投稿実行エラー: {e}")
+            
+            logger.info(f"  📈 {config['worksheet']}: {executed_count}件実行")
         
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown('<div class="auth-container">', unsafe_allow_html=True)
-            st.markdown("### 🔐 ログイン")
+        except Exception as e:
+            logger.error(f"ワークシート {config['worksheet']} の処理エラー: {e}")
+    
+    logger.info(f"⏰ 予約投稿チェック完了: 合計{total_executed}件実行")
+
+def execute_single_scheduled_post(row, project_name, config, sheet, row_num, 
+                                competitor_domains, other_links) -> bool:
+    """単一の予約投稿を実行"""
+    try:
+        # カウンター取得
+        current_counter = 0
+        if len(row) >= 7 and row[6]:
+            try:
+                current_counter = int(row[6])
+            except:
+                current_counter = 0
+        
+        # 最大投稿数チェック
+        max_posts = config.get('max_posts', 20)
+        if isinstance(max_posts, dict):
+            platform = row[2] if len(row) > 2 else list(max_posts.keys())[0]
+            max_posts = max_posts.get(platform.lower(), 20)
+        
+        if current_counter >= max_posts:
+            logger.warning(f"最大投稿数({max_posts})に達しています")
+            return False
+        
+        # 記事生成
+        if current_counter == max_posts - 1:
+            # 最終記事：宣伝URLを使用
+            logger.info(f"📝 最終記事 ({max_posts}記事目) を生成中...")
+            article = generate_article_with_link(
+                row[0] if row[0] else '',
+                row[1],
+                row[3] if len(row) >= 4 and row[3] else project_name
+            )
+        else:
+            # その他リンクを使用
+            logger.info(f"📝 記事 {current_counter + 1}/{max_posts-1} を生成中...")
+            other_link = choose_other_link(other_links, competitor_domains)
+            if not other_link:
+                logger.error("その他リンクが取得できません")
+                return False
             
-            username = st.text_input("ユーザー名", key="login_user")
-            password = st.text_input("パスワード", type="password", key="login_pass")
+            article = generate_article_with_link(
+                row[0] if row[0] else '',
+                other_link['url'],
+                other_link['anchor']
+            )
+        
+        # 投稿処理
+        posted = False
+        post_target = row[2] if len(row) > 2 else ''
+        
+        # プラットフォーム別投稿
+        if 'blogger' in config['platforms']:
+            if post_target.lower() in ['blogger', '両方', '']:
+                url = post_to_blogger(article)
+                if url:
+                    posted = True
+                    logger.info(f"📤 Blogger投稿成功: {url}")
+        
+        if 'livedoor' in config['platforms']:
+            if post_target.lower() in ['livedoor', '両方', '']:
+                url = post_to_livedoor(article)
+                if url:
+                    posted = True
+                    logger.info(f"📤 livedoor投稿成功: {url}")
+        
+        if 'seesaa' in config['platforms']:
+            if post_target.lower() in ['seesaa', '']:
+                url = post_to_seesaa(article)
+                if url:
+                    posted = True
+                    logger.info(f"📤 Seesaa投稿成功: {url}")
+        
+        if 'fc2' in config['platforms']:
+            if post_target.lower() in ['fc2']:
+                url = post_to_fc2(article)
+                if url:
+                    posted = True
+                    logger.info(f"📤 FC2投稿成功: {url}")
+        
+        if 'wordpress' in config['platforms']:
+            for wp_site in config.get('wp_sites', []):
+                if post_target.lower() in [wp_site, '両方', '']:
+                    url = post_to_wordpress(article, wp_site)
+                    if url:
+                        posted = True
+                        logger.info(f"📤 WordPress ({wp_site}) 投稿成功: {url}")
+        
+        # カウンター更新
+        if posted:
+            current_counter += 1
+            sheet.update_cell(row_num, 7, str(current_counter))
             
-            if st.button("ログイン", type="primary", use_container_width=True):
-                if username == "admin" and password == st.secrets.auth.admin_password:
-                    st.session_state.authenticated = True
-                    st.session_state.username = username
-                    st.session_state.is_admin = True
-                    st.rerun()
-                elif username in st.secrets.auth.client_passwords:
-                    if password == st.secrets.auth.client_passwords[username]:
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.session_state.is_admin = False
-                        st.rerun()
-                else:
-                    st.error("認証に失敗しました")
+            # 最終記事の場合は処理済みにする
+            if current_counter >= max_posts:
+                sheet.update_cell(row_num, 5, "処理済み")
+                sheet.update_cell(row_num, 9, datetime.now().strftime("%Y/%m/%d %H:%M"))
+                logger.info(f"🎯 プロジェクト完了: {max_posts}記事投稿済み")
             
-            st.markdown('</div>', unsafe_allow_html=True)
+            return True
+        else:
+            logger.error("すべてのプラットフォームへの投稿が失敗しました")
+            return False
+            
+    except Exception as e:
+        logger.error(f"単一予約投稿実行エラー: {e}")
         return False
-    return True
 
 # ========================
-# メイン処理
+# 既存のメイン処理（即座投稿用）
 # ========================
-
 def process_project(project_name: str, post_count: int):
-    """プロジェクトの投稿処理"""
+    """プロジェクトの投稿処理（即座投稿）"""
     if project_name not in PROJECT_CONFIGS:
         logger.error(f"不明なプロジェクト: {project_name}")
         return
@@ -765,9 +895,13 @@ def process_project(project_name: str, post_count: int):
     
     logger.info(f"プロジェクト {project_name} の処理完了: {posts_completed}記事投稿")
 
+# ========================
+# メイン処理
+# ========================
 def main():
     """メイン処理"""
     parser = argparse.ArgumentParser(description='ブログ自動投稿スクリプト')
+    parser.add_argument('--mode', default='immediate', help='実行モード: scheduled/immediate')
     parser.add_argument('--project', default='all', help='プロジェクト名')
     parser.add_argument('--count', type=int, default=1, help='投稿数')
     args = parser.parse_args()
@@ -775,25 +909,28 @@ def main():
     # ログディレクトリ作成
     os.makedirs('logs', exist_ok=True)
     
-    logger.info(f"自動投稿開始: project={args.project}, count={args.count}")
-    
-    if args.project == 'all':
-        # 全プロジェクトを処理
-        for project_name in PROJECT_CONFIGS.keys():
-            logger.info(f"プロジェクト {project_name} を処理中...")
-            process_project(project_name, args.count)
-            
-            # プロジェクト間の待機
-            if project_name != list(PROJECT_CONFIGS.keys())[-1]:
-                wait_time = random.randint(60, 120)
-                logger.info(f"次のプロジェクトまで {wait_time}秒待機...")
-                time.sleep(wait_time)
+    if args.mode == 'scheduled':
+        logger.info("⏰ 予約投稿チェックモードで開始")
+        check_and_execute_scheduled_posts()
     else:
-        # 指定プロジェクトのみ処理
-        process_project(args.project, args.count)
-    
-    logger.info("自動投稿完了")
+        logger.info(f"📝 即座投稿モード: project={args.project}, count={args.count}")
+        
+        if args.project == 'all':
+            # 全プロジェクトを処理
+            for project_name in PROJECT_CONFIGS.keys():
+                logger.info(f"プロジェクト {project_name} を処理中...")
+                process_project(project_name, args.count)
+                
+                # プロジェクト間の待機
+                if project_name != list(PROJECT_CONFIGS.keys())[-1]:
+                    wait_time = random.randint(60, 120)
+                    logger.info(f"次のプロジェクトまで {wait_time}秒待機...")
+                    time.sleep(wait_time)
+        else:
+            # 指定プロジェクトのみ処理
+            process_project(args.project, args.count)
+        
+        logger.info("即座投稿完了")
 
 if __name__ == "__main__":
     main()
-
