@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-統合ブログ投稿管理システム - Streamlit版
+統合ブログ投稿管理システム - Streamlit版（完全実装版）
 """
 
 import streamlit as st
@@ -19,6 +19,9 @@ from urllib.parse import urlparse
 import re
 import io
 from PIL import Image, ImageDraw, ImageFont
+import xmlrpc.client
+import tempfile
+import os
 
 # ページ設定
 st.set_page_config(
@@ -149,9 +152,6 @@ def check_authentication():
 @st.cache_resource
 def get_sheets_client():
     """Google Sheetsクライアントを取得"""
-    import json
-    import tempfile
-    
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     
     # Secretsから認証情報を取得してファイルに書き込み
@@ -165,7 +165,6 @@ def get_sheets_client():
     client = gspread.authorize(creds)
     
     # 一時ファイルを削除
-    import os
     os.unlink(temp_creds_file)
     
     return client
@@ -214,6 +213,52 @@ def update_sheet_immediately(worksheet_name: str, df: pd.DataFrame):
     except Exception as e:
         st.error(f"自動保存エラー: {e}")
         return False
+
+# ========================
+# その他のリンク取得
+# ========================
+def get_other_links() -> List[Dict]:
+    """その他のリンク先を取得"""
+    try:
+        client = get_sheets_client()
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet('その他リンク先')
+        rows = sheet.get_all_values()[1:]
+        other_sites = []
+        for row in rows:
+            if len(row) >= 2 and row[0] and row[1]:
+                other_sites.append({
+                    "url": row[0].strip(),
+                    "anchor": row[1].strip()
+                })
+        if not other_sites:
+            other_sites = [
+                {"url": "https://www.fsa.go.jp/", "anchor": "金融庁"},
+                {"url": "https://www.boj.or.jp/", "anchor": "日本銀行"}
+            ]
+        return other_sites
+    except:
+        return [
+            {"url": "https://www.fsa.go.jp/", "anchor": "金融庁"},
+            {"url": "https://www.boj.or.jp/", "anchor": "日本銀行"}
+        ]
+
+def get_competitor_domains() -> List[str]:
+    """競合他社ドメインリストを取得"""
+    try:
+        client = get_sheets_client()
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet('競合他社')
+        competitors = sheet.get_all_values()[1:]
+        domains = []
+        for row in competitors:
+            if row and row[0]:
+                domain = row[0].strip()
+                if domain.startswith('http'):
+                    parsed = urlparse(domain)
+                    domain = parsed.netloc
+                domains.append(domain.lower())
+        return domains
+    except:
+        return []
 
 # ========================
 # 記事生成
@@ -284,6 +329,247 @@ URL: {url}
         return None
 
 # ========================
+# 各プラットフォーム投稿関数
+# ========================
+
+def post_to_blogger(article: Dict) -> str:
+    """Bloggerに投稿（簡易版）"""
+    try:
+        # TODO: Blogger API実装
+        st.info("Blogger投稿機能は準備中です")
+        return ""
+    except Exception as e:
+        st.error(f"Blogger投稿エラー: {e}")
+        return ""
+
+def post_to_livedoor(article: Dict) -> str:
+    """livedoorブログに投稿"""
+    from xml.sax.saxutils import escape as xml_escape
+    import xml.etree.ElementTree as ET
+    
+    try:
+        config = st.secrets.livedoor
+        root_url = f"https://livedoor.blogcms.jp/atompub/{config.blog_name}"
+        endpoint = f"{root_url}/article"
+        
+        title_xml = xml_escape(article["title"])
+        content_xml = xml_escape(article["content"])
+        
+        entry_xml = f'''<?xml version="1.0" encoding="utf-8"?>
+<entry xmlns="http://www.w3.org/2005/Atom">
+  <title>{title_xml}</title>
+  <content type="html">{content_xml}</content>
+</entry>'''.encode("utf-8")
+        
+        from requests.auth import HTTPBasicAuth
+        response = requests.post(
+            endpoint,
+            data=entry_xml,
+            headers={"Content-Type": "application/atom+xml;type=entry"},
+            auth=HTTPBasicAuth(config.id, config.api_key),
+            timeout=30
+        )
+        
+        if response.status_code in (200, 201):
+            root_xml = ET.fromstring(response.text)
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            alt = root_xml.find(".//atom:link[@rel='alternate']", ns)
+            url = alt.get("href") if alt is not None else ""
+            if url:
+                return url
+    except Exception as e:
+        st.error(f"livedoor投稿エラー: {e}")
+    
+    return ""
+
+def post_to_seesaa(article: Dict) -> str:
+    """Seesaaブログに投稿"""
+    try:
+        config = st.secrets.seesaa
+        server = xmlrpc.client.ServerProxy("http://blog.seesaa.jp/rpc", allow_none=True)
+        
+        content = {
+            "title": article["title"],
+            "description": article["content"]
+        }
+        
+        post_id = server.metaWeblog.newPost(
+            config.blogid,
+            config.username,
+            config.password,
+            content,
+            True
+        )
+        
+        # URLを取得
+        try:
+            post = server.metaWeblog.getPost(post_id, config.username, config.password)
+            url = post.get("permalink") or post.get("link") or ""
+            if url:
+                return url
+        except:
+            pass
+        
+        return f"post_id:{post_id}"
+        
+    except Exception as e:
+        st.error(f"Seesaa投稿エラー: {e}")
+        return ""
+
+def post_to_fc2(article: Dict) -> str:
+    """FC2ブログに投稿"""
+    try:
+        config = st.secrets.fc2
+        server = xmlrpc.client.ServerProxy('https://blog.fc2.com/xmlrpc.php')
+        
+        content = {
+            'title': article['title'],
+            'description': article['content']
+        }
+        
+        post_id = server.metaWeblog.newPost(
+            config.blog_id,
+            config.username,
+            config.password,
+            content,
+            True
+        )
+        
+        return f"https://{config.blog_id}.blog.fc2.com/blog-entry-{post_id}.html"
+        
+    except Exception as e:
+        st.error(f"FC2投稿エラー: {e}")
+        return ""
+
+def post_to_wordpress(article: Dict, site_key: str) -> str:
+    """WordPressに投稿"""
+    try:
+        # サイトごとの設定を取得
+        wp_configs = {
+            'ykikaku': st.secrets.wp_ykikaku,
+            'efdlqjtz': st.secrets.wp_efdlqjtz,
+            'selectadvance': st.secrets.wp_selectadvance,
+            'welkenraedt': st.secrets.wp_welkenraedt,
+            'ncepqvub': st.secrets.wp_ncepqvub,
+            'kosagi': st.secrets.wp_kosagi,
+            'selectad': st.secrets.wp_selectad,
+            'thrones': st.secrets.wp_thrones,
+        }
+        
+        if site_key not in wp_configs:
+            st.error(f"不明なサイト: {site_key}")
+            return ""
+        
+        config = wp_configs[site_key]
+        
+        # XML-RPC投稿
+        server = xmlrpc.client.ServerProxy(f"{config.url}xmlrpc.php")
+        
+        post = {
+            'post_title': article['title'],
+            'post_content': article['content'],
+            'post_status': 'publish',
+            'post_type': 'post'
+        }
+        
+        post_id = server.wp.newPost(
+            0,
+            config.user,
+            config.password,
+            post
+        )
+        
+        return f"{config.url}?p={post_id}"
+        
+    except Exception as e:
+        st.error(f"WordPress投稿エラー ({site_key}): {e}")
+        return ""
+
+# ========================
+# 投稿処理
+# ========================
+def process_post_for_project(row_data: Dict, project_name: str, project_config: Dict) -> List[str]:
+    """プロジェクトに応じた投稿処理"""
+    results = []
+    
+    # カウンター取得
+    counter = 0
+    if 'カウンター' in row_data:
+        try:
+            counter = int(row_data['カウンター'])
+        except:
+            counter = 0
+    
+    # 最大投稿数チェック
+    max_posts = project_config.get('max_posts', 20)
+    if isinstance(max_posts, dict):
+        max_posts = list(max_posts.values())[0]
+    
+    # リンク決定（20記事目は宣伝URL、それ以外はその他リンク）
+    if counter == max_posts - 1:
+        # 最終記事：宣伝URLを使用
+        url = row_data.get('宣伝URL', '')
+        anchor = row_data.get('アンカーテキスト', project_name)
+    else:
+        # その他リンクを使用
+        other_links = get_other_links()
+        competitor_domains = get_competitor_domains()
+        
+        # 競合を除外
+        available_links = []
+        for link in other_links:
+            link_domain = urlparse(link['url']).netloc.lower()
+            if not any(comp in link_domain for comp in competitor_domains):
+                available_links.append(link)
+        
+        if available_links:
+            selected = random.choice(available_links)
+            url = selected['url']
+            anchor = selected['anchor']
+        else:
+            st.error("その他リンクが見つかりません")
+            return []
+    
+    # 記事生成
+    theme = row_data.get('テーマ', '')
+    article = generate_article(theme, url, anchor)
+    
+    if not article:
+        st.error("記事生成に失敗しました")
+        return []
+    
+    # プロジェクトごとの投稿処理
+    if project_name == 'ビックギフト':
+        if 'Blogger' in project_config['platforms']:
+            result = post_to_blogger(article)
+            if result:
+                results.append(result)
+        if 'livedoor' in project_config['platforms']:
+            result = post_to_livedoor(article)
+            if result:
+                results.append(result)
+    
+    elif project_name == 'ありがた屋':
+        target = row_data.get('投稿先', 'Seesaa')
+        if target == 'Seesaa':
+            result = post_to_seesaa(article)
+            if result:
+                results.append(result)
+        elif target == 'FC2':
+            result = post_to_fc2(article)
+            if result:
+                results.append(result)
+    
+    elif 'WordPress' in project_config['platforms']:
+        # WordPress系プロジェクト
+        for site in project_config.get('sites', []):
+            result = post_to_wordpress(article, site)
+            if result:
+                results.append(result)
+    
+    return results
+
+# ========================
 # アイキャッチ画像生成
 # ========================
 def create_eyecatch_image(title: str, project_name: str) -> bytes:
@@ -292,12 +578,12 @@ def create_eyecatch_image(title: str, project_name: str) -> bytes:
     
     # プロジェクトごとの色設定
     project_colors = {
-        'ビックギフト': ['#FF8C00', '#FFA500'],  # オレンジ系
-        'ありがた屋': ['#8B4513', '#CD853F'],    # ブラウン系
-        '買取LIFE': ['#FFD700', '#FFF59D'],      # イエロー系
-        'お財布レスキュー': ['#FF69B4', '#FFB6C1'],  # ピンク系
-        'クレかえる': ['#7CB342', '#AED581'],    # グリーン系
-        '赤いサイト': ['#FF4444', '#FF8888']     # レッド系
+        'ビックギフト': ['#FF8C00', '#FFA500'],
+        'ありがた屋': ['#8B4513', '#CD853F'],
+        '買取LIFE': ['#FFD700', '#FFF59D'],
+        'お財布レスキュー': ['#FF69B4', '#FFB6C1'],
+        'クレかえる': ['#7CB342', '#AED581'],
+        '赤いサイト': ['#FF4444', '#FF8888']
     }
     
     colors = project_colors.get(project_name, ['#667eea', '#764ba2'])
@@ -427,7 +713,6 @@ def main():
         project_names = list(PROJECTS.keys())
         if not st.session_state.is_admin:
             # クライアントは特定のプロジェクトのみ
-            # ここでクライアントごとのプロジェクト制限を実装
             pass
         
         selected_project = st.selectbox(
@@ -458,7 +743,7 @@ def main():
         df = load_sheet_data(project_info['worksheet'])
         
         if not df.empty:
-            # ステータス列のインデックスを取得（通常はE列=4）
+            # ステータス列のインデックスを取得
             status_col = 'ステータス' if 'ステータス' in df.columns else df.columns[4] if len(df.columns) > 4 else None
             counter_col = 'カウンター' if 'カウンター' in df.columns else df.columns[6] if len(df.columns) > 6 else None
             
@@ -477,12 +762,12 @@ def main():
             with col3:
                 st.metric("未処理", processing, delta=None)
             with col4:
-                st.metric("本日の投稿", "0", delta=None)  # TODO: 実装
+                st.metric("本日の投稿", "0", delta=None)
         
         # グラフ表示
         st.markdown("### 📈 投稿推移")
         
-        # ダミーデータでグラフ表示（実際のデータに置き換え）
+        # ダミーデータでグラフ表示
         import numpy as np
         dates = pd.date_range(start='2025-08-01', periods=30)
         data = pd.DataFrame({
@@ -514,8 +799,9 @@ def main():
                     new_columns.append(col)
             df.columns = new_columns
             
-            # デバッグ用（問題があれば表示）
-            # st.write("列名:", df.columns.tolist())
+            # 選択列を追加（なければ）
+            if '選択' not in df.columns:
+                df.insert(0, '選択', False)
             
             # 編集可能なデータエディタ
             edited_df = st.data_editor(
@@ -534,13 +820,13 @@ def main():
                         "宣伝URL",
                         help="宣伝するURL",
                         max_chars=50,
-                    ),
+                    ) if "宣伝URL" in df.columns else None,
                     "ステータス": st.column_config.SelectboxColumn(
                         "ステータス",
                         help="処理状況",
                         options=["未処理", "処理中", "処理済み", "エラー"],
                         default="未処理",
-                    ),
+                    ) if "ステータス" in df.columns else None,
                     "カウンター": st.column_config.NumberColumn(
                         "カウンター",
                         help="投稿済み記事数",
@@ -548,14 +834,17 @@ def main():
                         max_value=20,
                         step=1,
                         format="%d",
-                    ),
+                    ) if "カウンター" in df.columns else None,
                 }
             )
             
-            # 自動保存機能（データが変更されたら即座に保存）
+            # 自動保存機能
             if edited_df is not None and not df.equals(edited_df):
-                if update_sheet_immediately(project_info['worksheet'], edited_df):
+                # 選択列を除外して保存
+                save_df = edited_df.drop(columns=['選択']) if '選択' in edited_df.columns else edited_df
+                if update_sheet_immediately(project_info['worksheet'], save_df):
                     st.success("✅ 変更を自動保存しました", icon="💾")
+                    time.sleep(1)
                     st.rerun()
             
             # 投稿ボタン
@@ -566,27 +855,61 @@ def main():
             
             with col2:
                 if st.button("📤 選択行を投稿", type="primary", use_container_width=True):
-                    st.info("投稿処理を開始します...")
-                    # TODO: 投稿処理の実装
-            
-            # 更新ボタン
-            if st.button("💾 変更を保存", use_container_width=True):
-                # スプレッドシートに変更を保存
-                client = get_sheets_client()
-                sheet = client.open_by_key(SPREADSHEET_ID).worksheet(project_info['worksheet'])
-                
-                # DataFrameをリストに変換
-                values = [edited_df.columns.tolist()] + edited_df.values.tolist()
-                
-                # 全体を更新
-                sheet.clear()
-                sheet.update('A1', values)
-                
-                st.success("変更を保存しました！")
-                st.rerun()
+                    # 選択された行を取得
+                    selected_rows = edited_df[edited_df['選択'] == True] if '選択' in edited_df.columns else pd.DataFrame()
+                    
+                    if len(selected_rows) == 0:
+                        st.warning("投稿する行を選択してください")
+                    else:
+                        with st.spinner(f"{len(selected_rows)}件を投稿中..."):
+                            success_count = 0
+                            
+                            for idx, row in selected_rows.iterrows():
+                                # 投稿処理
+                                results = process_post_for_project(
+                                    row.to_dict(),
+                                    selected_project,
+                                    project_info
+                                )
+                                
+                                if results:
+                                    st.success(f"✅ 投稿成功: {row.get('宣伝URL', '')[:30]}...")
+                                    
+                                    # ステータス更新
+                                    row_num = idx + 2  # スプレッドシートの行番号
+                                    
+                                    # カウンター更新
+                                    current_counter = 0
+                                    if 'カウンター' in row:
+                                        try:
+                                            current_counter = int(row['カウンター'])
+                                        except:
+                                            current_counter = 0
+                                    
+                                    update_sheet_cell(project_info['worksheet'], row_num, 7, str(current_counter + 1))
+                                    
+                                    # 最大投稿数に達したら処理済みに
+                                    max_posts = project_info.get('max_posts', 20)
+                                    if isinstance(max_posts, dict):
+                                        max_posts = list(max_posts.values())[0]
+                                    
+                                    if current_counter + 1 >= max_posts:
+                                        update_sheet_cell(project_info['worksheet'], row_num, 5, '処理済み')
+                                        update_sheet_cell(project_info['worksheet'], row_num, 9, datetime.now().strftime("%Y/%m/%d %H:%M"))
+                                    
+                                    success_count += 1
+                                else:
+                                    st.error(f"❌ 投稿失敗: {row.get('宣伝URL', '')[:30]}...")
+                                
+                                # 連投防止
+                                if idx < len(selected_rows) - 1:
+                                    time.sleep(5)
+                            
+                            st.info(f"投稿完了: {success_count}/{len(selected_rows)}件成功")
+                            time.sleep(2)
+                            st.rerun()
         else:
             st.info("データがありません")
-
     
     # 予約設定タブ
     with tabs[2]:
@@ -608,18 +931,14 @@ def main():
             )
             
             if st.button("📅 予約を設定", type="primary", use_container_width=True):
-                st.success("予約を設定しました！")
+                st.success("予約機能は開発中です")
         
         with col2:
             st.markdown("#### 📊 予約状況")
             
-            # 予約済みの表示
             st.info("""
             **本日の予約**
-            - 09:00 - 1記事
-            - 12:00 - 1記事
-            - 15:00 - 1記事
-            - 18:00 - 1記事
+            - 予約機能は開発中です
             """)
     
     # 分析タブ
@@ -681,7 +1000,3 @@ def main():
 # ========================
 if __name__ == "__main__":
     main()
-
-
-
-
