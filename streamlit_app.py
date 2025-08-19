@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-統合ブログ投稿管理システム - Streamlit版（完全実装版）
+統合ブログ投稿管理システム - Streamlit版（予約投稿対応完全版）
 """
 
 import streamlit as st
@@ -22,6 +22,8 @@ from PIL import Image, ImageDraw, ImageFont
 import xmlrpc.client
 import tempfile
 import os
+import threading
+import queue
 
 # ページ設定
 st.set_page_config(
@@ -42,6 +44,10 @@ if 'posting_status' not in st.session_state:
     st.session_state.posting_status = {}
 if 'selected_project' not in st.session_state:
     st.session_state.selected_project = None
+if 'scheduled_posts' not in st.session_state:
+    st.session_state.scheduled_posts = []
+if 'scheduler_running' not in st.session_state:
+    st.session_state.scheduler_running = False
 
 # ========================
 # 設定
@@ -441,8 +447,8 @@ def post_to_fc2(article: Dict) -> str:
         st.error(f"FC2投稿エラー: {e}")
         return ""
 
-def post_to_wordpress(article: Dict, site_key: str) -> str:
-    """WordPressに投稿"""
+def post_to_wordpress(article: Dict, site_key: str, schedule_dt: Optional[datetime] = None) -> str:
+    """WordPressに投稿（予約投稿対応）"""
     try:
         # サイトごとの設定を取得
         wp_configs = {
@@ -468,9 +474,15 @@ def post_to_wordpress(article: Dict, site_key: str) -> str:
         post = {
             'post_title': article['title'],
             'post_content': article['content'],
-            'post_status': 'publish',
             'post_type': 'post'
         }
+        
+        # 予約投稿の設定
+        if schedule_dt and schedule_dt > datetime.now():
+            post['post_status'] = 'future'
+            post['post_date'] = schedule_dt.strftime('%Y%m%dT%H:%M:%S')
+        else:
+            post['post_status'] = 'publish'
         
         post_id = server.wp.newPost(
             0,
@@ -486,9 +498,61 @@ def post_to_wordpress(article: Dict, site_key: str) -> str:
         return ""
 
 # ========================
+# 予約投稿管理
+# ========================
+class ScheduledPost:
+    """予約投稿データクラス"""
+    def __init__(self, project_name: str, row_data: Dict, schedule_time: datetime, post_count: int = 1):
+        self.project_name = project_name
+        self.row_data = row_data
+        self.schedule_time = schedule_time
+        self.post_count = post_count
+        self.status = "待機中"
+        self.result = None
+
+def execute_scheduled_post(scheduled_post: ScheduledPost):
+    """予約投稿を実行"""
+    try:
+        scheduled_post.status = "実行中"
+        project_config = PROJECTS[scheduled_post.project_name]
+        
+        results = []
+        for i in range(scheduled_post.post_count):
+            result = process_post_for_project(
+                scheduled_post.row_data,
+                scheduled_post.project_name,
+                project_config
+            )
+            results.extend(result)
+            
+            # 連投防止
+            if i < scheduled_post.post_count - 1:
+                time.sleep(random.randint(300, 600))
+        
+        scheduled_post.status = "完了"
+        scheduled_post.result = results
+        return True
+        
+    except Exception as e:
+        scheduled_post.status = "エラー"
+        scheduled_post.result = str(e)
+        return False
+
+def schedule_monitor():
+    """予約投稿を監視して実行"""
+    while st.session_state.scheduler_running:
+        now = datetime.now()
+        
+        for scheduled_post in st.session_state.scheduled_posts:
+            if scheduled_post.status == "待機中" and scheduled_post.schedule_time <= now:
+                execute_scheduled_post(scheduled_post)
+        
+        time.sleep(30)  # 30秒ごとにチェック
+
+# ========================
 # 投稿処理
 # ========================
-def process_post_for_project(row_data: Dict, project_name: str, project_config: Dict) -> List[str]:
+def process_post_for_project(row_data: Dict, project_name: str, project_config: Dict, schedule_dt: Optional[datetime] = None) -> List[str]:
     """プロジェクトに応じた投稿処理"""
     results = []
     
@@ -563,87 +627,11 @@ def process_post_for_project(row_data: Dict, project_name: str, project_config: 
     elif 'WordPress' in project_config['platforms']:
         # WordPress系プロジェクト
         for site in project_config.get('sites', []):
-            result = post_to_wordpress(article, site)
+            result = post_to_wordpress(article, site, schedule_dt)
             if result:
                 results.append(result)
     
     return results
-
-# ========================
-# アイキャッチ画像生成
-# ========================
-def create_eyecatch_image(title: str, project_name: str) -> bytes:
-    """プロジェクトに応じたアイキャッチ画像を生成"""
-    width, height = 600, 400
-    
-    # プロジェクトごとの色設定
-    project_colors = {
-        'ビックギフト': ['#FF8C00', '#FFA500'],
-        'ありがた屋': ['#8B4513', '#CD853F'],
-        '買取LIFE': ['#FFD700', '#FFF59D'],
-        'お財布レスキュー': ['#FF69B4', '#FFB6C1'],
-        'クレかえる': ['#7CB342', '#AED581'],
-        '赤いサイト': ['#FF4444', '#FF8888']
-    }
-    
-    colors = project_colors.get(project_name, ['#667eea', '#764ba2'])
-    
-    # 画像作成
-    img = Image.new('RGB', (width, height), color=colors[0])
-    draw = ImageDraw.Draw(img)
-    
-    # グラデーション背景
-    for i in range(height):
-        alpha = i / height
-        r1 = int(colors[0][1:3], 16)
-        g1 = int(colors[0][3:5], 16)
-        b1 = int(colors[0][5:7], 16)
-        r2 = int(colors[1][1:3], 16)
-        g2 = int(colors[1][3:5], 16)
-        b2 = int(colors[1][5:7], 16)
-        
-        r = int(r1 * (1 - alpha) + r2 * alpha)
-        g = int(g1 * (1 - alpha) + g2 * alpha)
-        b = int(b1 * (1 - alpha) + b2 * alpha)
-        
-        draw.rectangle([(0, i), (width, i + 1)], fill=(r, g, b))
-    
-    # 装飾
-    draw.ellipse([-50, -50, 150, 150], fill=colors[1])
-    draw.ellipse([width-100, height-100, width+50, height+50], fill=colors[1])
-    
-    # フォント設定
-    try:
-        font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 32)
-    except:
-        font = ImageFont.load_default()
-    
-    # タイトル描画
-    lines = []
-    if len(title) > 15:
-        mid = len(title) // 2
-        lines = [title[:mid], title[mid:]]
-    else:
-        lines = [title]
-    
-    y_start = (height - len(lines) * 50) // 2
-    for i, line in enumerate(lines):
-        try:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_width = bbox[2] - bbox[0]
-        except:
-            text_width = len(line) * 20
-        
-        x = (width - text_width) // 2
-        y = y_start + i * 50
-        draw.text((x, y), line, font=font, fill='white')
-    
-    # バイトデータとして返す
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format='JPEG', quality=90)
-    img_byte_arr.seek(0)
-    
-    return img_byte_arr.getvalue()
 
 # ========================
 # メインUI
@@ -666,24 +654,12 @@ def main():
         color: white;
         text-align: center;
     }
-    .project-card {
-        background: white;
+    .schedule-card {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
         padding: 1.5rem;
         border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
-        transition: transform 0.3s;
-    }
-    .project-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 5px 20px rgba(0,0,0,0.2);
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        padding: 1rem;
-        border-radius: 8px;
         color: white;
-        text-align: center;
+        margin-bottom: 1rem;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -711,10 +687,6 @@ def main():
         st.markdown("### 🎯 プロジェクト選択")
         
         project_names = list(PROJECTS.keys())
-        if not st.session_state.is_admin:
-            # クライアントは特定のプロジェクトのみ
-            pass
-        
         selected_project = st.selectbox(
             "プロジェクトを選択",
             project_names,
@@ -730,7 +702,7 @@ def main():
         """, unsafe_allow_html=True)
     
     # メインコンテンツ
-    tabs = st.tabs(["📊 ダッシュボード", "📝 投稿管理", "⏰ 予約設定", "📈 分析", "⚙️ 設定"])
+    tabs = st.tabs(["📊 ダッシュボード", "⏰ 予約投稿", "📝 即時投稿", "📈 分析"])
     
     # ダッシュボードタブ
     with tabs[0]:
@@ -743,118 +715,267 @@ def main():
         df = load_sheet_data(project_info['worksheet'])
         
         if not df.empty:
-            # ステータス列のインデックスを取得
-            status_col = 'ステータス' if 'ステータス' in df.columns else df.columns[4] if len(df.columns) > 4 else None
-            counter_col = 'カウンター' if 'カウンター' in df.columns else df.columns[6] if len(df.columns) > 6 else None
-            
             total_urls = len(df)
-            if status_col:
-                completed = len(df[df[status_col] == '処理済み'])
-                processing = len(df[df[status_col].isin(['処理中', '未処理', ''])])
-            else:
-                completed = 0
-                processing = total_urls
+            completed = len(df[df.get('ステータス', df.columns[4] if len(df.columns) > 4 else 'ステータス') == '処理済み']) if not df.empty else 0
+            processing = total_urls - completed
+            scheduled = len(st.session_state.scheduled_posts)
             
             with col1:
-                st.metric("総URL数", total_urls, delta=None)
+                st.metric("総URL数", total_urls)
             with col2:
-                st.metric("処理済み", completed, delta=f"{completed/total_urls*100:.1f}%")
+                st.metric("処理済み", completed)
             with col3:
-                st.metric("未処理", processing, delta=None)
+                st.metric("未処理", processing)
             with col4:
-                st.metric("本日の投稿", "0", delta=None)
+                st.metric("予約中", scheduled)
         
-        # グラフ表示
-        st.markdown("### 📈 投稿推移")
+        # 予約投稿状況
+        st.markdown("### 📅 予約投稿状況")
         
-        # ダミーデータでグラフ表示
-        import numpy as np
-        dates = pd.date_range(start='2025-08-01', periods=30)
-        data = pd.DataFrame({
-            '日付': dates,
-            '投稿数': np.random.randint(0, 10, 30)
-        })
-        st.line_chart(data.set_index('日付'))
+        if st.session_state.scheduled_posts:
+            for post in st.session_state.scheduled_posts:
+                status_color = {
+                    "待機中": "🟡",
+                    "実行中": "🔵",
+                    "完了": "🟢",
+                    "エラー": "🔴"
+                }.get(post.status, "⚪")
+                
+                st.markdown(f"""
+                {status_color} **{post.project_name}** - {post.schedule_time.strftime('%Y/%m/%d %H:%M')}
+                - 投稿数: {post.post_count}
+                - ステータス: {post.status}
+                """)
+        else:
+            st.info("予約投稿はありません")
     
-    # 投稿管理タブ
+    # 予約投稿タブ（メイン機能）
     with tabs[1]:
-        st.markdown("### 📝 投稿管理")
+        st.markdown("### ⏰ 予約投稿設定")
         
-        # データ表示
+        # データ読み込み
         df = load_sheet_data(project_info['worksheet'])
         
         if not df.empty:
-            # 列名のクリーンアップ（エラー対策）
+            # 列名のクリーンアップ
             df.columns = [str(col).strip() if col else f"列{i+1}" for i, col in enumerate(df.columns)]
             
-            # 重複する列名を修正
-            seen = {}
-            new_columns = []
-            for col in df.columns:
-                if col in seen:
-                    seen[col] += 1
-                    new_columns.append(f"{col}_{seen[col]}")
-                else:
-                    seen[col] = 0
-                    new_columns.append(col)
-            df.columns = new_columns
-            
-            # 選択列を追加（なければ）
+            # 選択列を追加
             if '選択' not in df.columns:
                 df.insert(0, '選択', False)
             
-            # 編集可能なデータエディタ
+            # データ表示
+            st.markdown("#### 📋 投稿対象を選択")
+            
             edited_df = st.data_editor(
                 df,
-                num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
-                key="data_editor",
+                key="schedule_data_editor",
+                column_config={
+                    "選択": st.column_config.CheckboxColumn(
+                        "選択",
+                        help="予約投稿する行を選択",
+                        default=False,
+                    )
+                }
+            )
+            
+            # 予約設定
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown("#### 🕐 投稿スケジュール")
+                
+                # 複数の日時設定
+                schedule_input = st.text_area(
+                    "予約日時（1行1件）",
+                    value=datetime.now().strftime('%Y/%m/%d 09:00\n%Y/%m/%d 12:00\n%Y/%m/%d 15:00\n%Y/%m/%d 18:00'),
+                    height=200,
+                    help="形式: YYYY/MM/DD HH:MM または HH:MM（本日）"
+                )
+                
+                # 投稿数設定
+                post_count_per_schedule = st.number_input(
+                    "各時刻での投稿数",
+                    min_value=1,
+                    max_value=5,
+                    value=1,
+                    help="各予約時刻で何記事投稿するか"
+                )
+            
+            with col2:
+                st.markdown("#### ⚙️ オプション")
+                
+                # 投稿間隔
+                interval_min = st.number_input(
+                    "最小間隔（秒）",
+                    min_value=60,
+                    max_value=3600,
+                    value=300,
+                    step=60
+                )
+                
+                interval_max = st.number_input(
+                    "最大間隔（秒）",
+                    min_value=60,
+                    max_value=3600,
+                    value=600,
+                    step=60
+                )
+                
+                # WordPressの場合の予約投稿
+                use_wp_schedule = st.checkbox(
+                    "WordPress予約投稿を使用",
+                    value=False,
+                    help="WordPressの予約投稿機能を使用（WordPress系のみ）"
+                )
+            
+            # 予約実行ボタン
+            if st.button("🚀 予約投稿を設定", type="primary", use_container_width=True):
+                # 選択された行を取得
+                selected_rows = edited_df[edited_df['選択'] == True] if '選択' in edited_df.columns else pd.DataFrame()
+                
+                if len(selected_rows) == 0:
+                    st.warning("投稿する行を選択してください")
+                else:
+                    # 予約時刻をパース
+                    schedule_times = []
+                    now = datetime.now()
+                    
+                    for line in schedule_input.strip().split('\n'):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        # 時刻のパース
+                        try:
+                            # YYYY/MM/DD HH:MM形式
+                            if '/' in line:
+                                dt = datetime.strptime(line, '%Y/%m/%d %H:%M')
+                            # HH:MM形式（本日）
+                            elif ':' in line:
+                                time_parts = line.split(':')
+                                hour = int(time_parts[0])
+                                minute = int(time_parts[1])
+                                dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                
+                                # 過去の時刻なら翌日に設定
+                                if dt <= now:
+                                    dt += timedelta(days=1)
+                            else:
+                                continue
+                            
+                            schedule_times.append(dt)
+                        except:
+                            st.warning(f"無効な日時形式: {line}")
+                    
+                    if not schedule_times:
+                        st.error("有効な予約時刻がありません")
+                    else:
+                        # 予約を作成
+                        created_count = 0
+                        
+                        for idx, row in selected_rows.iterrows():
+                            for schedule_time in schedule_times:
+                                scheduled_post = ScheduledPost(
+                                    project_name=selected_project,
+                                    row_data=row.to_dict(),
+                                    schedule_time=schedule_time,
+                                    post_count=post_count_per_schedule
+                                )
+                                st.session_state.scheduled_posts.append(scheduled_post)
+                                created_count += 1
+                        
+                        st.success(f"✅ {created_count}件の予約投稿を設定しました")
+                        
+                        # スケジューラーを開始
+                        if not st.session_state.scheduler_running:
+                            st.session_state.scheduler_running = True
+                            scheduler_thread = threading.Thread(target=schedule_monitor, daemon=True)
+                            scheduler_thread.start()
+                            st.info("⏰ 予約投稿スケジューラーを開始しました")
+                        
+                        time.sleep(2)
+                        st.rerun()
+        else:
+            st.info("データがありません")
+        
+        # 予約一覧
+        st.divider()
+        st.markdown("### 📅 予約投稿一覧")
+        
+        if st.session_state.scheduled_posts:
+            # 予約をテーブル表示
+            schedule_data = []
+            for post in st.session_state.scheduled_posts:
+                schedule_data.append({
+                    "プロジェクト": post.project_name,
+                    "予約日時": post.schedule_time.strftime('%Y/%m/%d %H:%M'),
+                    "投稿数": post.post_count,
+                    "ステータス": post.status,
+                    "URL": post.row_data.get('宣伝URL', '')[:30] + '...' if post.row_data.get('宣伝URL', '') else ''
+                })
+            
+            schedule_df = pd.DataFrame(schedule_data)
+            st.dataframe(schedule_df, use_container_width=True)
+            
+            # 予約クリアボタン
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("🗑️ 完了済みをクリア", use_container_width=True):
+                    st.session_state.scheduled_posts = [
+                        post for post in st.session_state.scheduled_posts
+                        if post.status != "完了"
+                    ]
+                    st.rerun()
+            
+            with col2:
+                if st.button("🔄 全てクリア", use_container_width=True):
+                    st.session_state.scheduled_posts = []
+                    st.session_state.scheduler_running = False
+                    st.rerun()
+        else:
+            st.info("予約投稿はありません")
+    
+    # 即時投稿タブ
+    with tabs[2]:
+        st.markdown("### 📝 即時投稿")
+        
+        # データ読み込み
+        df = load_sheet_data(project_info['worksheet'])
+        
+        if not df.empty:
+            # 列名のクリーンアップ
+            df.columns = [str(col).strip() if col else f"列{i+1}" for i, col in enumerate(df.columns)]
+            
+            # 選択列を追加
+            if '選択' not in df.columns:
+                df.insert(0, '選択', False)
+            
+            # データ表示
+            edited_df = st.data_editor(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                key="immediate_data_editor",
                 column_config={
                     "選択": st.column_config.CheckboxColumn(
                         "選択",
                         help="投稿する行を選択",
                         default=False,
-                    ),
-                    "宣伝URL": st.column_config.LinkColumn(
-                        "宣伝URL",
-                        help="宣伝するURL",
-                        max_chars=50,
-                    ) if "宣伝URL" in df.columns else None,
-                    "ステータス": st.column_config.SelectboxColumn(
-                        "ステータス",
-                        help="処理状況",
-                        options=["未処理", "処理中", "処理済み", "エラー"],
-                        default="未処理",
-                    ) if "ステータス" in df.columns else None,
-                    "カウンター": st.column_config.NumberColumn(
-                        "カウンター",
-                        help="投稿済み記事数",
-                        min_value=0,
-                        max_value=20,
-                        step=1,
-                        format="%d",
-                    ) if "カウンター" in df.columns else None,
+                    )
                 }
             )
-            
-            # 自動保存機能
-            if edited_df is not None and not df.equals(edited_df):
-                # 選択列を除外して保存
-                save_df = edited_df.drop(columns=['選択']) if '選択' in edited_df.columns else edited_df
-                if update_sheet_immediately(project_info['worksheet'], save_df):
-                    st.success("✅ 変更を自動保存しました", icon="💾")
-                    time.sleep(1)
-                    st.rerun()
             
             # 投稿ボタン
             col1, col2, col3 = st.columns([1, 1, 3])
             
             with col1:
-                post_count = st.number_input("投稿数", min_value=1, max_value=5, value=1)
+                post_count = st.number_input("投稿数", min_value=1, max_value=5, value=1, key="immediate_post_count")
             
             with col2:
-                if st.button("📤 選択行を投稿", type="primary", use_container_width=True):
+                if st.button("📤 今すぐ投稿", type="primary", use_container_width=True):
                     # 選択された行を取得
                     selected_rows = edited_df[edited_df['選択'] == True] if '選択' in edited_df.columns else pd.DataFrame()
                     
@@ -876,7 +997,7 @@ def main():
                                     st.success(f"✅ 投稿成功: {row.get('宣伝URL', '')[:30]}...")
                                     
                                     # ステータス更新
-                                    row_num = idx + 2  # スプレッドシートの行番号
+                                    row_num = idx + 2
                                     
                                     # カウンター更新
                                     current_counter = 0
@@ -911,36 +1032,6 @@ def main():
         else:
             st.info("データがありません")
     
-    # 予約設定タブ
-    with tabs[2]:
-        st.markdown("### ⏰ 予約投稿設定")
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.markdown("#### 📅 予約スケジュール")
-            
-            # カレンダー風の表示
-            selected_date = st.date_input("日付を選択", datetime.now())
-            
-            # 時刻設定
-            times = st.text_area(
-                "投稿時刻（1行1時刻）",
-                value="09:00\n12:00\n15:00\n18:00",
-                height=150
-            )
-            
-            if st.button("📅 予約を設定", type="primary", use_container_width=True):
-                st.success("予約機能は開発中です")
-        
-        with col2:
-            st.markdown("#### 📊 予約状況")
-            
-            st.info("""
-            **本日の予約**
-            - 予約機能は開発中です
-            """)
-    
     # 分析タブ
     with tabs[3]:
         st.markdown("### 📈 分析")
@@ -948,52 +1039,38 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 🎯 投稿先別統計")
+            st.markdown("#### 🎯 投稿実績")
             
-            # ダミーデータ
-            platform_data = pd.DataFrame({
-                'プラットフォーム': project_info['platforms'],
-                '投稿数': [random.randint(50, 200) for _ in project_info['platforms']]
+            # 予約投稿の実績
+            completed_posts = [p for p in st.session_state.scheduled_posts if p.status == "完了"]
+            error_posts = [p for p in st.session_state.scheduled_posts if p.status == "エラー"]
+            waiting_posts = [p for p in st.session_state.scheduled_posts if p.status == "待機中"]
+            
+            metrics_data = pd.DataFrame({
+                'ステータス': ['完了', 'エラー', '待機中'],
+                '件数': [len(completed_posts), len(error_posts), len(waiting_posts)]
             })
             
-            st.bar_chart(platform_data.set_index('プラットフォーム'))
+            st.bar_chart(metrics_data.set_index('ステータス'))
         
         with col2:
-            st.markdown("#### 📊 カテゴリ別統計")
+            st.markdown("#### 📊 プロジェクト別統計")
             
-            categories = ['お金の豆知識', '投資', 'クレジットカード', 'ローン', 'その他']
-            category_data = pd.DataFrame({
-                'カテゴリ': categories,
-                '記事数': [random.randint(10, 50) for _ in categories]
-            })
+            # プロジェクト別の予約数
+            project_stats = {}
+            for post in st.session_state.scheduled_posts:
+                if post.project_name not in project_stats:
+                    project_stats[post.project_name] = 0
+                project_stats[post.project_name] += 1
             
-            st.bar_chart(category_data.set_index('カテゴリ'))
-    
-    # 設定タブ
-    with tabs[4]:
-        st.markdown("### ⚙️ 設定")
-        
-        if st.session_state.is_admin:
-            st.markdown("#### 🔑 API設定")
-            
-            # API設定の表示（読み取り専用）
-            with st.expander("Gemini API設定"):
-                st.text_input("API Key 1", value="*" * 20, disabled=True)
-                st.text_input("API Key 2", value="*" * 20, disabled=True)
-            
-            with st.expander("投稿先設定"):
-                for platform in ['Blogger', 'livedoor', 'Seesaa', 'FC2', 'WordPress']:
-                    st.text_input(f"{platform} 認証情報", value="*" * 20, disabled=True)
-            
-            st.markdown("#### 🔄 自動投稿設定")
-            
-            auto_post_enabled = st.checkbox("自動投稿を有効化", value=False)
-            
-            if auto_post_enabled:
-                interval = st.slider("投稿間隔（時間）", min_value=1, max_value=24, value=2)
-                st.info(f"{interval}時間ごとに自動投稿を実行します")
-        else:
-            st.info("管理者のみ設定を変更できます")
+            if project_stats:
+                stats_df = pd.DataFrame({
+                    'プロジェクト': list(project_stats.keys()),
+                    '予約数': list(project_stats.values())
+                })
+                st.bar_chart(stats_df.set_index('プロジェクト'))
+            else:
+                st.info("データがありません")
 
 # ========================
 # エントリーポイント
