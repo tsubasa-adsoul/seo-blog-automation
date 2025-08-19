@@ -1,28 +1,51 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-自動投稿実行スクリプト（GitHub Actions用）
-予約投稿対応版
+統合ブログ投稿管理システム - 完全予約投稿対応版
+PCシャットダウン対応・GitHub Actions連携
 """
 
-import os
-import sys
-import json
-import time
-import random
-import argparse
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-import requests
+import streamlit as st
+import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import xmlrpc.client
-from urllib.parse import urlparse
-from requests.auth import HTTPBasicAuth
+import time
+import random
+from datetime import datetime, timedelta
+import requests
+from typing import Dict, List, Optional, Tuple
+import json
 import base64
-import pickle
+from urllib.parse import urlparse
 import re
+import io
+from PIL import Image, ImageDraw, ImageFont
+import xmlrpc.client
+import tempfile
+import os
+import logging
+
+# ログ設定（Streamlit Cloud対応）
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # コンソール出力のみ
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# ページ設定
+st.set_page_config(
+    page_title="📝 統合ブログ投稿管理システム",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ========================
+# セッション状態の初期化
+# ========================
 
 # ログ設定
 logging.basicConfig(
@@ -934,3 +957,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
