@@ -47,18 +47,6 @@ st.set_page_config(
 # セッション状態の初期化
 # ========================
 
-# ログ設定
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'logs/post_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# 環境変数から設定を読み込み
 SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID', '1sV0r6LavB4BgU7jGaa5C-GdyogUpWr_y42a-tNZXuFo')
 CREDENTIALS_FILE = 'credentials.json'
 
@@ -957,4 +945,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
