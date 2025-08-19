@@ -197,6 +197,24 @@ def update_sheet_cell(worksheet_name: str, row: int, col: int, value: str):
         st.error(f"更新エラー: {e}")
         return False
 
+def update_sheet_immediately(worksheet_name: str, df: pd.DataFrame):
+    """データフレーム全体を即座にスプレッドシートに保存"""
+    try:
+        client = get_sheets_client()
+        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(worksheet_name)
+        
+        # DataFrameをリストに変換（ヘッダー含む）
+        values = [df.columns.tolist()] + df.values.tolist()
+        
+        # 全体を更新
+        sheet.clear()
+        sheet.update('A1', values)
+        
+        return True
+    except Exception as e:
+        st.error(f"自動保存エラー: {e}")
+        return False
+
 # ========================
 # 記事生成
 # ========================
@@ -637,4 +655,5 @@ def main():
 # ========================
 if __name__ == "__main__":
     main()
+
 
