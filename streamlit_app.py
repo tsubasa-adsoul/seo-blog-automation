@@ -661,7 +661,7 @@ def main():
                 posts_per_time = st.slider(
                     "各時刻での投稿数",
                     min_value=1,
-                    max_value=1,
+                    max_value=5,
                     value=1,
                     help="通常は1記事ずつ投稿（カウンターが進みます）"
                 )
@@ -897,3 +897,4 @@ jobs:
 # ========================
 if __name__ == "__main__":
     main()
+
