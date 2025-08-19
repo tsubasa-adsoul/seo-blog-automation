@@ -642,7 +642,7 @@ def check_and_execute_scheduled_posts():
                                     
                                     if success:
                                         # 予約時刻を「完了」に変更
-                                        sheet.update_cell(row_idx, col_idx + 1, "完了")
+                                        sheet.update_cell(row_idx, col_idx + 1, "完了")  # ←col_idx + 1 → col_idx に修正
                                         logger.info(f"✅ 予約投稿完了")
                                         executed_count += 1
                                         total_executed += 1
@@ -1285,5 +1285,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
