@@ -205,3 +205,40 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# === プロジェクト固有の設定 ===
+
+# 認証情報・シークレット
+credentials.json
+.streamlit/secrets.toml
+blogger_credentials.json
+blogger_token.pickle
+token.pickle
+*.pickle
+
+# ログファイル
+logs/
+
+# テスト用ファイル
+test_*.py
+temp_*.py
+
+# メモ・個人ファイル
+memo.txt
+memo.md
+notes/
+
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# バックアップファイル
+*.bak
+*.backup
+*~
+
+# 一時ファイル
+*.tmp
+*.temp
