@@ -907,6 +907,52 @@ def process_project(project_name: str, post_count: int):
     logger.info(f"プロジェクト {project_name} の処理完了: {posts_completed}記事投稿")
 
 # ========================
+# 認証
+# ========================
+def check_authentication():
+    """ユーザー認証"""
+    if not st.session_state.authenticated:
+        st.markdown("""
+        <style>
+        .auth-container {
+            max-width: 400px;
+            margin: auto;
+            padding: 2rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown('<div class="auth-container">', unsafe_allow_html=True)
+            st.markdown("### 🔐 ログイン")
+            
+            username = st.text_input("ユーザー名", key="login_user")
+            password = st.text_input("パスワード", type="password", key="login_pass")
+            
+            if st.button("ログイン", type="primary", use_container_width=True):
+                if username == "admin" and password == st.secrets.auth.admin_password:
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.session_state.is_admin = True
+                    st.rerun()
+                elif username in st.secrets.auth.client_passwords:
+                    if password == st.secrets.auth.client_passwords[username]:
+                        st.session_state.authenticated = True
+                        st.session_state.username = username
+                        st.session_state.is_admin = False
+                        st.rerun()
+                else:
+                    st.error("認証に失敗しました")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        return False
+    return True
+
+# ========================
 # メイン処理
 # ========================
 def main():
@@ -1239,4 +1285,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
