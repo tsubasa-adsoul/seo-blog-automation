@@ -499,13 +499,31 @@ def main():
         df = load_sheet_data(project_info['worksheet'])
         
         if not df.empty:
+            # 列名のクリーンアップ（エラー対策）
+            df.columns = [str(col).strip() if col else f"列{i+1}" for i, col in enumerate(df.columns)]
+            
+            # 重複する列名を修正
+            seen = {}
+            new_columns = []
+            for col in df.columns:
+                if col in seen:
+                    seen[col] += 1
+                    new_columns.append(f"{col}_{seen[col]}")
+                else:
+                    seen[col] = 0
+                    new_columns.append(col)
+            df.columns = new_columns
+            
+            # デバッグ用（問題があれば表示）
+            # st.write("列名:", df.columns.tolist())
+            
             # 編集可能なデータエディタ
             edited_df = st.data_editor(
                 df,
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
-                key="data_editor",  # ← キーを追加
+                key="data_editor",
                 column_config={
                     "選択": st.column_config.CheckboxColumn(
                         "選択",
@@ -533,11 +551,12 @@ def main():
                     ),
                 }
             )
-        # 自動保存機能（データが変更されたら即座に保存）
-        if edited_df is not None and not df.equals(edited_df):
-            if update_sheet_immediately(project_info['worksheet'], edited_df):
-                st.success("✅ 変更を自動保存しました", icon="💾")
-                st.rerun()  # 画面を更新
+            
+            # 自動保存機能（データが変更されたら即座に保存）
+            if edited_df is not None and not df.equals(edited_df):
+                if update_sheet_immediately(project_info['worksheet'], edited_df):
+                    st.success("✅ 変更を自動保存しました", icon="💾")
+                    st.rerun()
             
             # 投稿ボタン
             col1, col2, col3 = st.columns([1, 1, 3])
@@ -567,6 +586,7 @@ def main():
                 st.rerun()
         else:
             st.info("データがありません")
+
     
     # 予約設定タブ
     with tabs[2]:
@@ -661,6 +681,7 @@ def main():
 # ========================
 if __name__ == "__main__":
     main()
+
 
 
 
