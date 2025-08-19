@@ -1,0 +1,143 @@
+name: Auto Blog Post
+
+on:
+  schedule:
+    # 30分ごとに予約投稿をチェック
+    - cron: '0,30 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード'
+        required: false
+        default: 'scheduled'
+        type: choice
+        options:
+          - scheduled
+          - immediate
+      project:
+        description: 'プロジェクト名'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - biggift
+          - arigataya
+          - kaitori_life
+          - osaifu_rescue
+          - kure_kaeru
+          - red_site
+      post_count:
+        description: '投稿数'
+        required: false
+        default: '1'
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Create credentials file
+        run: |
+          echo '${{ secrets.GCP_SERVICE_ACCOUNT }}' > credentials.json
+      
+      - name: Run posting script
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          
+          # Blogger
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOGGER_CREDENTIALS: ${{ secrets.BLOGGER_CREDENTIALS }}
+          BLOGGER_TOKEN: ${{ secrets.BLOGGER_TOKEN }}
+          
+          # livedoor
+          LIVEDOOR_BLOG_NAME: ${{ secrets.LIVEDOOR_BLOG_NAME }}
+          LIVEDOOR_ID: ${{ secrets.LIVEDOOR_ID }}
+          LIVEDOOR_API_KEY: ${{ secrets.LIVEDOOR_API_KEY }}
+          
+          # Seesaa
+          SEESAA_USERNAME: ${{ secrets.SEESAA_USERNAME }}
+          SEESAA_PASSWORD: ${{ secrets.SEESAA_PASSWORD }}
+          SEESAA_BLOGID: ${{ secrets.SEESAA_BLOGID }}
+          
+          # FC2
+          FC2_BLOG_ID: ${{ secrets.FC2_BLOG_ID }}
+          FC2_USERNAME: ${{ secrets.FC2_USERNAME }}
+          FC2_PASSWORD: ${{ secrets.FC2_PASSWORD }}
+          
+          # WordPress各サイト
+          WP_YKIKAKU_URL: ${{ secrets.WP_YKIKAKU_URL }}
+          WP_YKIKAKU_USER: ${{ secrets.WP_YKIKAKU_USER }}
+          WP_YKIKAKU_PASSWORD: ${{ secrets.WP_YKIKAKU_PASSWORD }}
+          
+          WP_EFDLQJTZ_URL: ${{ secrets.WP_EFDLQJTZ_URL }}
+          WP_EFDLQJTZ_USER: ${{ secrets.WP_EFDLQJTZ_USER }}
+          WP_EFDLQJTZ_PASSWORD: ${{ secrets.WP_EFDLQJTZ_PASSWORD }}
+          
+          WP_SELECTADVANCE_URL: ${{ secrets.WP_SELECTADVANCE_URL }}
+          WP_SELECTADVANCE_USER: ${{ secrets.WP_SELECTADVANCE_USER }}
+          WP_SELECTADVANCE_PASSWORD: ${{ secrets.WP_SELECTADVANCE_PASSWORD }}
+          
+          WP_WELKENRAEDT_URL: ${{ secrets.WP_WELKENRAEDT_URL }}
+          WP_WELKENRAEDT_USER: ${{ secrets.WP_WELKENRAEDT_USER }}
+          WP_WELKENRAEDT_PASSWORD: ${{ secrets.WP_WELKENRAEDT_PASSWORD }}
+          
+          WP_NCEPQVUB_URL: ${{ secrets.WP_NCEPQVUB_URL }}
+          WP_NCEPQVUB_USER: ${{ secrets.WP_NCEPQVUB_USER }}
+          WP_NCEPQVUB_PASSWORD: ${{ secrets.WP_NCEPQVUB_PASSWORD }}
+          
+          WP_KOSAGI_URL: ${{ secrets.WP_KOSAGI_URL }}
+          WP_KOSAGI_USER: ${{ secrets.WP_KOSAGI_USER }}
+          WP_KOSAGI_PASSWORD: ${{ secrets.WP_KOSAGI_PASSWORD }}
+          
+          WP_SELECTAD_URL: ${{ secrets.WP_SELECTAD_URL }}
+          WP_SELECTAD_USER: ${{ secrets.WP_SELECTAD_USER }}
+          WP_SELECTAD_PASSWORD: ${{ secrets.WP_SELECTAD_PASSWORD }}
+          
+          WP_THRONES_URL: ${{ secrets.WP_THRONES_URL }}
+          WP_THRONES_USER: ${{ secrets.WP_THRONES_USER }}
+          WP_THRONES_PASSWORD: ${{ secrets.WP_THRONES_PASSWORD }}
+          
+        run: |
+          MODE="${{ github.event.inputs.mode || 'scheduled' }}"
+          
+          if [ "$MODE" = "scheduled" ]; then
+            python scripts/post_executor.py --mode scheduled
+          else
+            PROJECT="${{ github.event.inputs.project || 'all' }}"
+            POST_COUNT="${{ github.event.inputs.post_count || '1' }}"
+            python scripts/post_executor.py --project $PROJECT --count $POST_COUNT
+          fi
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: posting-logs
+          path: logs/
+          retention-days: 7
