@@ -910,40 +910,332 @@ def process_project(project_name: str, post_count: int):
 # メイン処理
 # ========================
 def main():
-    """メイン処理"""
-    parser = argparse.ArgumentParser(description='ブログ自動投稿スクリプト')
-    parser.add_argument('--mode', default='immediate', help='実行モード: scheduled/immediate')
-    parser.add_argument('--project', default='all', help='プロジェクト名')
-    parser.add_argument('--count', type=int, default=1, help='投稿数')
-    args = parser.parse_args()
+    """メインアプリケーション"""
     
-    # ログディレクトリ作成
-    os.makedirs('logs', exist_ok=True)
+    # 認証チェック
+    if not check_authentication():
+        return
     
-    if args.mode == 'scheduled':
-        logger.info("⏰ 予約投稿チェックモードで開始")
-        check_and_execute_scheduled_posts()
-    else:
-        logger.info(f"📝 即座投稿モード: project={args.project}, count={args.count}")
+    # カスタムCSS
+    st.markdown("""
+    <style>
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        color: white;
+        text-align: center;
+    }
+    .schedule-card {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 1rem;
+    }
+    .warning-box {
+        background: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background: #d4edda;
+        border-left: 4px solid #28a745;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # ヘッダー
+    st.markdown("""
+    <div class="main-header">
+        <h1>📝 統合ブログ投稿管理システム</h1>
+        <p>完全予約投稿対応版 - PCシャットダウンOK</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # サイドバー
+    with st.sidebar:
+        st.markdown(f"### 👤 {st.session_state.username}")
         
-        if args.project == 'all':
-            # 全プロジェクトを処理
-            for project_name in PROJECT_CONFIGS.keys():
-                logger.info(f"プロジェクト {project_name} を処理中...")
-                process_project(project_name, args.count)
-                
-                # プロジェクト間の待機
-                if project_name != list(PROJECT_CONFIGS.keys())[-1]:
-                    wait_time = random.randint(60, 120)
-                    logger.info(f"次のプロジェクトまで {wait_time}秒待機...")
-                    time.sleep(wait_time)
+        if st.button("🚪 ログアウト", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.username = None
+            st.rerun()
+        
+        st.divider()
+        
+        # プロジェクト選択
+        st.markdown("### 🎯 プロジェクト選択")
+        
+        project_names = list(PROJECTS.keys())
+        selected_project = st.selectbox(
+            "プロジェクトを選択",
+            project_names,
+            key="project_selector"
+        )
+        
+        project_info = PROJECTS[selected_project]
+        
+        # 予約投稿対応状況を表示
+        supports_schedule = project_info.get('supports_schedule', False)
+        if isinstance(supports_schedule, dict):
+            schedule_status = "一部対応"
+            schedule_color = "#ff9800"
+        elif supports_schedule:
+            schedule_status = "完全対応"
+            schedule_color = "#4caf50"
         else:
-            # 指定プロジェクトのみ処理
-            process_project(args.project, args.count)
+            schedule_status = "GitHub Actions必要"
+            schedule_color = "#f44336"
         
-        logger.info("即座投稿完了")
+        st.markdown(f"""
+        <div style="background: {project_info['color']}20; padding: 1rem; border-radius: 8px; border-left: 4px solid {project_info['color']};">
+            <h4>{project_info['icon']} {selected_project}</h4>
+            <p>プラットフォーム: {', '.join(project_info['platforms'])}</p>
+            <p style="color: {schedule_color};">予約投稿: {schedule_status}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # メインコンテンツ
+    tabs = st.tabs(["⏰ 予約投稿", "📝 即時投稿", "📊 ダッシュボード", "⚙️ 設定"])
+    
+    # 予約投稿タブ（メイン）
+    with tabs[0]:
+        st.markdown("### ⏰ 完全予約投稿システム")
+        
+        # 予約投稿の説明
+        if project_info.get('supports_schedule') == True or \
+           (isinstance(project_info.get('supports_schedule'), dict) and 'WordPress' in str(project_info.get('supports_schedule'))):
+            st.markdown("""
+            <div class="success-box">
+            ✅ <b>このプロジェクトは完全予約投稿対応</b><br>
+            投稿予約後、PCをシャットダウンしても自動投稿されます。
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="warning-box">
+            ⚠️ <b>このプロジェクトはGitHub Actions設定が必要</b><br>
+            予約情報はスプレッドシートに記録されます。<br>
+            GitHub Actionsで定期実行することで予約投稿が可能です。
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # データ読み込み
+        df = load_sheet_data(project_info['worksheet'])
+        
+        if not df.empty:
+            # 列名のクリーンアップ
+            df.columns = [str(col).strip() if col else f"列{i+1}" for i, col in enumerate(df.columns)]
+            
+            # 選択列を追加
+            if '選択' not in df.columns:
+                df.insert(0, '選択', False)
+            
+            # データ表示
+            st.markdown("#### 📋 投稿対象を選択")
+            
+            edited_df = st.data_editor(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                key="schedule_data_editor",
+                column_config={
+                    "選択": st.column_config.CheckboxColumn(
+                        "選択",
+                        help="予約投稿する行を選択",
+                        default=False,
+                    )
+                }
+            )
+            
+            # 予約設定
+            st.markdown("#### 🕐 予約スケジュール設定")
+            
+            col1, col2 = st.columns([3, 2])
+            
+            with col1:
+                # 複数の日時設定
+                default_times = []
+                now = datetime.now()
+                for hour in [9, 12, 15, 18]:
+                    dt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+                    if dt > now:
+                        default_times.append(dt.strftime('%Y/%m/%d %H:%M'))
+                
+                if not default_times:
+                    # 今日の時間が全て過ぎている場合は明日の時間
+                    tomorrow = now + timedelta(days=1)
+                    for hour in [9, 12, 15, 18]:
+                        dt = tomorrow.replace(hour=hour, minute=0, second=0, microsecond=0)
+                        default_times.append(dt.strftime('%Y/%m/%d %H:%M'))
+                
+                schedule_input = st.text_area(
+                    "予約日時（1行1件）",
+                    value='\n'.join(default_times),
+                    height=200,
+                    help="形式: YYYY/MM/DD HH:MM"
+                )
+                
+                # 各時刻での投稿数
+                posts_per_time = st.number_input(
+                    "各時刻での投稿数",
+                    min_value=1,
+                    max_value=5,
+                    value=1,
+                    step=1,
+                    help="通常は1記事ずつ投稿（カウンターが進みます）"
+                )
+            
+            with col2:
+                st.markdown("#### 📊 予約サマリー")
+                
+                # 入力された時刻を解析
+                schedule_times = []
+                for line in schedule_input.strip().split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        dt = datetime.strptime(line, '%Y/%m/%d %H:%M')
+                        if dt > datetime.now():
+                            schedule_times.append(dt)
+                    except:
+                        pass
+                
+                if schedule_times:
+                    st.success(f"✅ {len(schedule_times)}回の投稿を予約")
+                    for dt in schedule_times[:5]:  # 最初の5件を表示
+                        st.write(f"• {dt.strftime('%m/%d %H:%M')}")
+                    if len(schedule_times) > 5:
+                        st.write(f"... 他 {len(schedule_times) - 5}件")
+                else:
+                    st.warning("有効な予約時刻がありません")
+                
+                # 選択行数
+                selected_count = len(edited_df[edited_df['選択'] == True]) if '選択' in edited_df.columns else 0
+                st.info(f"選択行数: {selected_count}")
+                
+                if selected_count > 0 and schedule_times:
+                    total_posts = selected_count * len(schedule_times) * posts_per_time
+                    st.metric("総投稿数", total_posts)
+            
+            # 予約実行ボタン
+            if st.button("🚀 予約投稿を実行", type="primary", use_container_width=True):
+                selected_rows = edited_df[edited_df['選択'] == True] if '選択' in edited_df.columns else pd.DataFrame()
+                
+                if len(selected_rows) == 0:
+                    st.error("投稿する行を選択してください")
+                elif not schedule_times:
+                    st.error("有効な予約時刻を入力してください")
+                else:
+                    # プログレスバー
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    total_tasks = len(selected_rows) * len(schedule_times)
+                    current_task = 0
+                    
+                    all_results = []
+                    
+                    for idx, row in selected_rows.iterrows():
+                        row_num = idx + 2  # スプレッドシートの行番号
+                        
+                        status_text.text(f"処理中: {row.get('宣伝URL', '')[:30]}...")
+                        
+                        # 予約投稿を処理
+                        results = process_scheduled_posts(
+                            row.to_dict(),
+                            selected_project,
+                            project_info,
+                            schedule_times
+                        )
+                        
+                        all_results.append(results)
+                        
+                        # スプレッドシートに予約情報を記録
+                        if results['success'] or results['github_actions_needed']:
+                            add_schedule_to_sheet(project_info['worksheet'], row_num, schedule_times)
+                            update_sheet_cell(project_info['worksheet'], row_num, 5, '予約済み')
+                        
+                        current_task += len(schedule_times)
+                        progress_bar.progress(current_task / total_tasks)
+                    
+                    # 結果表示
+                    st.markdown("### 📊 予約結果")
+                    
+                    total_success = sum(len(r['success']) for r in all_results)
+                    total_failed = sum(len(r['failed']) for r in all_results)
+                    total_github = sum(len(r['github_actions_needed']) for r in all_results)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("✅ 成功", total_success)
+                    with col2:
+                        st.metric("❌ 失敗", total_failed)
+                    with col3:
+                        st.metric("⏰ GitHub Actions待ち", total_github)
+                    
+                    if total_success > 0:
+                        st.success(f"""
+                        ✅ {total_success}件の予約投稿が完了しました。
+                        PCをシャットダウンしても、指定時刻に自動投稿されます。
+                        """)
+                    
+                    if total_github > 0:
+                        st.warning(f"""
+                        ⚠️ {total_github}件はGitHub Actionsでの処理が必要です。
+                        スプレッドシートのK列以降に予約時刻が記録されました。
+                        """)
+                    
+                    time.sleep(3)
+                    st.rerun()
+        else:
+            st.info("データがありません")
+    
+    # 即時投稿タブ
+    with tabs[1]:
+        st.markdown("### 📝 即時投稿")
+        st.info("即時投稿機能は簡易版です。予約投稿をご利用ください。")
+    
+    # ダッシュボードタブ
+    with tabs[2]:
+        st.markdown("### 📊 ダッシュボード")
+        
+        df = load_sheet_data(project_info['worksheet'])
+        
+        if not df.empty:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            total_urls = len(df)
+            status_col = 'ステータス' if 'ステータス' in df.columns else df.columns[4] if len(df.columns) > 4 else None
+            
+            if status_col:
+                completed = len(df[df[status_col] == '処理済み'])
+                scheduled = len(df[df[status_col] == '予約済み'])
+                processing = total_urls - completed - scheduled
+            else:
+                completed = 0
+                scheduled = 0
+                processing = total_urls
+            
+            with col1:
+                st.metric("総URL数", total_urls)
+            with col2:
+                st.metric("処理済み", completed)
+            with col3:
+                st.metric("予約済み", scheduled)
+            with col4:
+                st.metric("未処理", processing)
+    
+    # 設定タブ
+    with tabs[3]:
+        st.markdown("### ⚙️ 設定")
+        st.info("GitHub Actionsが30分ごとに予約投稿をチェックして実行しています。")
 
 if __name__ == "__main__":
     main()
-
-
