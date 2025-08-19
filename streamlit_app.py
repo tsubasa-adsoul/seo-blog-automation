@@ -497,6 +497,22 @@ def process_scheduled_posts(row_data: Dict, project_name: str, project_config: D
 # ========================
 # メインUI
 # ========================
+
+def initialize_session_state():
+    """セッション状態の初期化"""
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'user_info' not in st.session_state:
+        st.session_state.user_info = None
+    if 'projects' not in st.session_state:
+        st.session_state.projects = []
+    if 'current_project' not in st.session_state:
+        st.session_state.current_project = None
+    if 'sheets_service' not in st.session_state:
+        st.session_state.sheets_service = None
+    if 'processing' not in st.session_state:
+        st.session_state.processing = False
+
 def main():
     initialize_session_state()
     """メインアプリケーション"""
@@ -878,5 +894,6 @@ jobs:
 # ========================
 if __name__ == "__main__":
     main()
+
 
 
