@@ -498,7 +498,7 @@ def process_scheduled_posts(row_data: Dict, project_name: str, project_config: D
 # メインUI
 # ========================
 def main():
-　initialize_session_state() 
+    initialize_session_state()
     """メインアプリケーション"""
     
     # 認証チェック
@@ -878,4 +878,5 @@ jobs:
 # ========================
 if __name__ == "__main__":
     main()
+
 
