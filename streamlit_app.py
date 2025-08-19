@@ -326,7 +326,7 @@ def call_gemini(prompt: str) -> str:
     if not api_key:
         raise RuntimeError("Gemini APIキーが設定されていません")
     endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}'
-    payload = {"contents": [{"parts": [{"text": prompt}]}]], "generationConfig": {"temperature": 0.7}}
+    payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.7}}
     r = requests.post(endpoint, json=payload, timeout=60)
     if r.status_code != 200:
         raise RuntimeError(f"Gemini API エラー: {r.status_code} {r.text[:200]}")
@@ -947,3 +947,4 @@ PY
 # ========================
 if __name__ == "__main__":
     main()
+
