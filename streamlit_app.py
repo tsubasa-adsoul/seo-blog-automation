@@ -643,7 +643,7 @@ URL: {url}
 # ========================
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
                       schedule_dt: datetime = None, enable_eyecatch: bool = True) -> str:
-    """WordPressに投稿（エラー処理強化版）"""
+    """WordPressに投稿(エラー処理強化版)"""  # 半角に修正
     if site_key not in WP_CONFIGS:
         st.error(f"不明なサイト: {site_key}")
         return ""
@@ -1031,7 +1031,7 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
         return ""
 
 def post_to_blogger(article: dict) -> str:
-    """Blogger投稿（簡易実装）"""
+    """Blogger投稿(簡易実装)"""  # ← 半角括弧に修正
     # 実装が複雑なため、ここでは簡易版
     st.warning("Blogger投稿は未実装（認証が複雑なため）")
     return ""
