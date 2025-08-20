@@ -126,46 +126,47 @@ PLATFORM_CONFIGS = {
 }
 
 # WordPressサイト（Secrets から構築）
+# WordPressサイト（緊急対応版）
 WP_CONFIGS = {
     "ykikaku": {
-        "url":      st.secrets.get("WP_YKIKAKU_URL", ""),
-        "user":     st.secrets.get("WP_YKIKAKU_USER", ""),
-        "password": st.secrets.get("WP_YKIKAKU_PASSWORD", "")
+        "url": "https://ykikaku.xsrv.jp/",
+        "user": "ykikaku",
+        "password": "lfXp BJNx Rvy8 rBlt Yjug ADRn"
     },
     "efdlqjtz": {
-        "url":      st.secrets.get("WP_EFDLQJTZ_URL", ""),
-        "user":     st.secrets.get("WP_EFDLQJTZ_USER", ""),
-        "password": st.secrets.get("WP_EFDLQJTZ_PASSWORD", "")
+        "url": "https://www.efdlqjtz.v2010.coreserver.jp/",
+        "user": "efdlqjtz",
+        "password": "KCIA cTyz TcdG U1Qs M4pd eezb"
     },
     "selectadvance": {
-        "url":      st.secrets.get("WP_SELECTADVANCE_URL", ""),
-        "user":     st.secrets.get("WP_SELECTADVANCE_USER", ""),
-        "password": st.secrets.get("WP_SELECTADVANCE_PASSWORD", "")
+        "url": "https://selectadvance.v2006.coreserver.jp/",
+        "user": "selectadvance",
+        "password": "6HUY g7oZ Gow8 LBCu yzL8 cR3S"
     },
     "welkenraedt": {
-        "url":      st.secrets.get("WP_WELKENRAEDT_URL", ""),
-        "user":     st.secrets.get("WP_WELKENRAEDT_USER", ""),
-        "password": st.secrets.get("WP_WELKENRAEDT_PASSWORD", "")
+        "url": "https://www.welkenraedt-online.com/",
+        "user": "welkenraedtonline",
+        "password": "yzn4 6nlm vtrh 8N4v oxHl KUvf"
     },
     "ncepqvub": {
-        "url":      st.secrets.get("WP_NCEPQVUB_URL", ""),
-        "user":     st.secrets.get("WP_NCEPQVUB_USER", ""),
-        "password": st.secrets.get("WP_NCEPQVUB_PASSWORD", "")
+        "url": "https://ncepqvub.v2009.coreserver.jp/",
+        "user": "ncepqvub",
+        "password": "DIZy ky10 UAhO NJ47 6Jww ImdE"
     },
     "kosagi": {
-        "url":      st.secrets.get("WP_KOSAGI_URL", ""),
-        "user":     st.secrets.get("WP_KOSAGI_USER", ""),
-        "password": st.secrets.get("WP_KOSAGI_PASSWORD", "")
+        "url": "https://www.kosagi.jp/",
+        "user": "kosagi",
+        "password": "K2DZ ERIy aTLb K2Z0 gHi6 XdIN"
     },
     "selectad01": {
-        "url":      st.secrets.get("WP_SELECTAD_URL", ""),
-        "user":     st.secrets.get("WP_SELECTAD_USER", ""),
-        "password": st.secrets.get("WP_SELECTAD_PASSWORD", "")
+        "url": "https://selectad01.xsrv.jp/",
+        "user": "selectad01",
+        "password": "8LhM laXm pDUx gkjV cg1f EXYr"
     },
     "thrones": {
-        "url":      st.secrets.get("WP_THRONES_URL", ""),
-        "user":     st.secrets.get("WP_THRONES_USER", ""),
-        "password": st.secrets.get("WP_THRONES_PASSWORD", "")
+        "url": "https://thrones.v2009.coreserver.jp/",
+        "user": "thrones",
+        "password": "ETvJ VP2F jugd mxXU xJX0 wHVr"
     }
 }
 
@@ -1569,6 +1570,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
