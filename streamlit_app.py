@@ -237,11 +237,11 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     draw.rectangle([50, 40, width-50, 42], fill=scheme['text'])
     
     # バイトデータとして返す
-    buf = io.BytesIO()
-    img.save(buf, format='JPEG', quality=90)
-    buf.seek(0)
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='JPEG', quality=90)
+    img_byte_arr.seek(0)
     
-    return buf.getvalue()
+    return img_byte_arr.getvalue()
 
 
 # post_to_wordpress関数（完全版・2段階処理）
@@ -1590,5 +1590,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
