@@ -48,6 +48,259 @@ def normalize_base_url(u: str) -> str:
         u += '/'
     return u
 
+# スラッグ自動生成関数を追加
+def generate_slug_from_title(title):
+    """タイトルから英数字のスラッグを生成"""
+    import re
+    from datetime import datetime
+    import random
+    
+    keyword_map = {
+        '投資': 'investment',
+        '資産': 'asset',
+        '運用': 'management',
+        '増やす': 'increase',
+        '貯金': 'savings',
+        '節約': 'saving',
+        'クレジット': 'credit',
+        'カード': 'card',
+        'ローン': 'loan',
+        '金融': 'finance',
+        '銀行': 'bank',
+        '保険': 'insurance',
+        '実践': 'practice',
+        '方法': 'method',
+        '戦略': 'strategy',
+        'ガイド': 'guide',
+        '初心者': 'beginner',
+        '完全': 'complete',
+        '効果': 'effect',
+        '成功': 'success',
+        '選び方': 'selection',
+        '比較': 'comparison',
+        '活用': 'utilization',
+        'おすすめ': 'recommend',
+        '基礎': 'basic',
+        '知識': 'knowledge',
+        '対策': 'measures',
+        '解決': 'solution',
+        '買取': 'kaitori',
+        '業者': 'company',
+        '先払い': 'sakibarai',
+        '爆速': 'bakusoku',
+        '賢く': 'smart',
+        '乗り切る': 'survive',
+        'お金': 'money',
+        '困らない': 'noworry',
+        '金欠': 'shortage',
+        '現金化': 'cash',
+        '即日': 'sameday',
+        '審査': 'screening',
+        '申込': 'application',
+        '利用': 'use',
+        '安全': 'safe',
+        '注意': 'caution',
+        '危険': 'danger',
+        '詐欺': 'scam',
+        '違法': 'illegal'
+    }
+    
+    slug_parts = ['money']
+    
+    # タイトルから関連キーワードを抽出
+    found_keyword = False
+    for jp_word, en_word in keyword_map.items():
+        if jp_word in title:
+            slug_parts.append(en_word)
+            found_keyword = True
+            break
+    
+    # キーワードが見つからない場合はtipsを追加
+    if not found_keyword:
+        slug_parts.append('tips')
+    
+    # 日付とランダム数字を追加
+    date_str = datetime.now().strftime('%m%d')
+    random_num = random.randint(100, 999)
+    
+    slug = '-'.join(slug_parts) + f'-{date_str}-{random_num}'
+    
+    return slug.lower()
+
+def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None,
+                      schedule_dt: datetime = None, enable_eyecatch: bool = True, project_key: str = None) -> str:
+    if site_key not in WP_CONFIGS:
+        add_notification(f"不明なサイト: {site_key}", "error", project_key)
+        return ""
+    
+    site_config = WP_CONFIGS[site_key]
+    
+    # ベースURLの正規化（スキーム保持）
+    base_url = site_config['url']
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = 'https://' + base_url
+    if not base_url.endswith('/'):
+        base_url += '/'
+    
+    # デバッグ情報
+    add_notification(f"ベースURL: {base_url}", "info", project_key)
+    
+    # kosagi: XMLRPCで即時 or 待機→即時
+    if site_key == 'kosagi':
+        if schedule_dt and schedule_dt > datetime.now():
+            wait_seconds = max(0, int((schedule_dt - datetime.now()).total_seconds()))
+            add_notification(f"kosagi待機: {wait_seconds}秒", "info", project_key)
+            progress_bar = st.progress(0)
+            total = max(wait_seconds, 1)
+            for i in range(wait_seconds):
+                progress_bar.progress((i+1)/total)
+                time.sleep(1)
+            add_notification("kosagi投稿開始", "success", project_key)
+        
+        endpoint = f"{base_url}xmlrpc.php"
+        import html
+        escaped_title = html.escape(article_data['title'])
+        
+        # XMLRPCでもスラッグを設定
+        slug = generate_slug_from_title(article_data['title'])
+        add_notification(f"XMLRPC用スラッグ生成: {slug}", "info", project_key)
+        
+        xml_request = f"""<?xml version="1.0" encoding="UTF-8"?>
+<methodCall>
+    <methodName>wp.newPost</methodName>
+    <params>
+        <param><value><int>0</int></value></param>
+        <param><value><string>{site_config['user']}</string></value></param>
+        <param><value><string>{site_config['password']}</string></value></param>
+        <param>
+            <value>
+                <struct>
+                    <member><name>post_type</name><value><string>post</string></value></member>
+                    <member><name>post_status</name><value><string>publish</string></value></member>
+                    <member><name>post_title</name><value><string>{escaped_title}</string></value></member>
+                    <member><name>post_content</name><value><string><![CDATA[{article_data['content']}]]></string></value></member>
+                    <member><name>wp_slug</name><value><string>{slug}</string></value></member>
+                </struct>
+            </value>
+        </param>
+    </params>
+</methodCall>"""
+        try:
+            add_notification("kosagi XMLRPC投稿...", "info", project_key)
+            response = requests.post(
+                endpoint, data=xml_request.encode('utf-8'),
+                headers={'Content-Type':'text/xml; charset=UTF-8','User-Agent':'WordPress XML-RPC Client'},
+                timeout=60
+            )
+            if response.status_code == 200:
+                if '<name>faultCode</name>' in response.text:
+                    fault_match = re.search(r'<name>faultString</name>.*?<string>(.*?)</string>', response.text, re.DOTALL)
+                    fault_msg = fault_match.group(1) if fault_match else "不明なエラー"
+                    add_notification(f"kosagi XMLRPC投稿エラー: {fault_msg}", "error", project_key)
+                    return ""
+                match = re.search(r'<string>(\d+)</string>', response.text)
+                if match:
+                    post_id = match.group(1)
+                    post_url = f"{base_url}{slug}/"  # スラッグベースのURL
+                    add_notification(f"kosagi投稿成功: {post_url}", "success", project_key)
+                    return post_url
+                add_notification("kosagi投稿成功 (ID抽出失敗)", "success", project_key)
+                return base_url
+            else:
+                add_notification(f"kosagi投稿失敗: HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
+                return ""
+        except Exception as e:
+            add_notification(f"kosagi投稿エラー: {e}", "error", project_key)
+            return ""
+    
+    # 通常WP: REST API
+    endpoint = f"{base_url}wp-json/wp/v2/posts"
+    add_notification(f"REST API エンドポイント: {endpoint}", "info", project_key)
+    
+    # スラッグの自動生成
+    slug = generate_slug_from_title(article_data['title'])
+    add_notification(f"生成スラッグ: {slug}", "info", project_key)
+    
+    post_data = {
+        'title': article_data['title'], 
+        'content': article_data['content'], 
+        'status': 'publish',
+        'slug': slug
+    }
+    
+    if schedule_dt and schedule_dt > datetime.now():
+        post_data['status'] = 'future'
+        post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
+        add_notification(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}", "info", project_key)
+    
+    # カテゴリー設定
+    if category_name:
+        try:
+            categories_endpoint = f"{base_url}wp-json/wp/v2/categories"
+            cat_response = requests.get(categories_endpoint)
+            if cat_response.status_code == 200:
+                categories = cat_response.json()
+                for cat in categories:
+                    if cat['name'] == category_name:
+                        post_data['categories'] = [cat['id']]
+                        add_notification(f"カテゴリー設定: {category_name} (ID: {cat['id']})", "info", project_key)
+                        break
+        except Exception as e:
+            add_notification(f"カテゴリー設定エラー: {e}", "warning", project_key)
+    
+    if enable_eyecatch:
+        try:
+            add_notification(f"アイキャッチ生成: {site_key}", "info", project_key)
+            eyecatch_data = create_eyecatch_image(article_data['title'], site_key)
+            media_endpoint = f"{base_url}wp-json/wp/v2/media"
+            add_notification(f"メディア エンドポイント: {media_endpoint}", "info", project_key)
+            
+            files = {'file': ('eyecatch.jpg', eyecatch_data, 'image/jpeg')}
+            media_data = {'title': f"アイキャッチ: {article_data['title'][:30]}...", 'alt_text': article_data['title']}
+            media_response = requests.post(media_endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+                                           files=files, data=media_data, timeout=60)
+            if media_response.status_code == 201:
+                media_info = media_response.json()
+                post_data['featured_media'] = media_info['id']
+                add_notification(f"アイキャッチUP成功 ({site_key})", "success", project_key)
+            else:
+                add_notification(f"アイキャッチUP失敗 ({site_key}): {media_response.status_code}", "warning", project_key)
+        except Exception as e:
+            add_notification(f"アイキャッチ処理エラー ({site_key}): {e}", "warning", project_key)
+    
+    try:
+        add_notification(f"{site_key}投稿開始（REST）", "info", project_key)
+        response = requests.post(endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+                                 headers={'Content-Type':'application/json'}, data=json.dumps(post_data), timeout=60)
+        if response.status_code in (200, 201):
+            try:
+                data = response.json()
+                post_url = data.get('link','')
+                if schedule_dt and schedule_dt > datetime.now():
+                    add_notification(f"予約投稿成功 ({site_key}): {post_url}", "success", project_key)
+                else:
+                    add_notification(f"投稿成功 ({site_key}): {post_url}", "success", project_key)
+                return post_url
+            except Exception as e:
+                add_notification(f"{site_key}投稿成功だがJSON解析エラー: {e}", "warning", project_key)
+                return base_url
+        elif response.status_code == 401:
+            add_notification(f"{site_key}認証エラー(401)", "error", project_key)
+        elif response.status_code == 403:
+            add_notification(f"{site_key}権限エラー(403)", "error", project_key)
+        elif response.status_code == 404:
+            add_notification(f"{site_key}API未有効/URL誤り(404)", "error", project_key)
+        else:
+            try:
+                msg = response.json().get('message','Unknown')
+            except Exception:
+                msg = response.text[:300]
+            add_notification(f"{site_key}投稿失敗: HTTP {response.status_code} - {msg}", "error", project_key)
+        return ""
+    except Exception as e:
+        add_notification(f"{site_key}投稿エラー: {e}", "error", project_key)
+        return ""
+
 
 # ========================
 # ページ設定
@@ -1570,6 +1823,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
