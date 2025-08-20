@@ -22,6 +22,11 @@ import io
 from PIL import Image, ImageDraw, ImageFont
 import base64
 from pathlib import Path
+from PIL import ImageFont
+
+FONT_PATH = Path(__file__).parent / "fonts" / "NotoSansJP-Bold.ttf"
+print(FONT_PATH.exists())  # True になるか確認
+
 
 # ==============
 # 可用ライブラリ検出（Blogger系）
@@ -1575,6 +1580,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
