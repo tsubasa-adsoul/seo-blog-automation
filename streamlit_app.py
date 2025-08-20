@@ -516,6 +516,11 @@ def call_gemini(prompt: str) -> str:
     # ここまで来たら失敗
     raise Exception(last_err or "Gemini API 呼び出しに失敗しました")
 # ==== PATCH END ====
+# ==== PATCH: cache wrapper ====
+@st.cache_data(ttl=1800)  # 30分キャッシュ
+def _cached_generate_article(theme: str, url: str, anchor: str) -> dict:
+    return generate_article_with_link(theme, url, anchor)
+# ==== PATCH END ====
 
 def generate_article_with_link(theme: str, url: str, anchor_text: str) -> dict:
     auto_theme = False
@@ -925,7 +930,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     add_realtime_log("🧠 記事を生成中...")
                     with st.spinner("記事を生成中..."):
                         theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
-                        article = generate_article_with_link(theme, url, anchor)
+                        article = _cached_generate_article(theme, url, anchor)
                     st.success(f"タイトル: {article['title']}")
                     st.info(f"使用リンク: {anchor}")
 
@@ -1286,4 +1291,5 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
