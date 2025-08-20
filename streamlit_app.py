@@ -144,9 +144,9 @@ PLATFORM_CONFIGS = {
     }
 }
 
-# 投稿間隔（スパム回避）
-MIN_INTERVAL = 60
-MAX_INTERVAL = 120
+# 投稿間隔（スパム回避） - Streamlit用に短縮
+MIN_INTERVAL = 30
+MAX_INTERVAL = 60
 
 # ========================
 # Streamlit設定
@@ -1063,47 +1063,52 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                         st.error("投稿に失敗しました")
                         break
                     
-                    # カウンター更新
+                    # カウンター更新（記事投稿後に即座に更新）
                     current_counter += 1
                     posts_completed += 1
+                    
+                    # スプレッドシートを即座に更新
+                    client = get_sheets_client()
+                    config_sheet = PROJECT_CONFIGS[project_key]
+                    sheet = client.open_by_key(SHEET_ID).worksheet(config_sheet['worksheet'])
+                    
+                    # 行を特定して更新
+                    all_rows = sheet.get_all_values()
+                    promo_url = row_data.get('宣伝URL', '')
+                    
+                    for row_idx, row in enumerate(all_rows[1:], start=2):
+                        if len(row) > 1 and row[1] == promo_url:
+                            # カウンター更新
+                            sheet.update_cell(row_idx, 7, str(current_counter))
+                            
+                            # 最終記事完了チェック
+                            if current_counter >= max_posts:
+                                sheet.update_cell(row_idx, 5, "処理済み")
+                                sheet.update_cell(row_idx, 6, ', '.join(posted_urls))
+                                completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+                                sheet.update_cell(row_idx, 9, completion_time)  # I列
+                                st.balloons()
+                                st.success(f"{max_posts}記事完了!")
+                                return True
+                            else:
+                                st.success(f"カウンター更新: {current_counter}")
+                            break
                     
                     # プログレスバー更新
                     progress_bar.progress(posts_completed / post_count)
                     
-                    # 最終記事完了チェック
-                    if current_counter >= max_posts:
-                        st.balloons()
-                        st.success(f"{max_posts}記事完了!")
-                        break
+                    # 最終記事でなければ次の記事へ
+                    if current_counter < max_posts and i < post_count - 1:
+                        wait_time = random.randint(MIN_INTERVAL, MAX_INTERVAL)
+                        st.info(f"次の記事まで{wait_time}秒待機中...")
+                        time.sleep(wait_time)
                     
-                    # 投稿間隔
-                    if i < post_count - 1:
-                        time.sleep(random.randint(MIN_INTERVAL, MAX_INTERVAL))
-                        
                 except Exception as e:
                     st.error(f"記事{i+1}の投稿エラー: {e}")
                     break
         
-        if posts_completed > 0:
-            # スプレッドシート更新
-            new_counter = (current_counter if current_counter > 0 else posts_completed)
-            updates = {'カウンター': str(new_counter)}
-            
-            if new_counter >= max_posts:
-                # 最終記事完了
-                updates['ステータス'] = '処理済み'
-                updates['投稿URL'] = ', '.join(posted_urls)
-                completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
-                # I列に日時記録
-                if len(row_data.columns) >= 9:
-                    updates[row_data.columns[8]] = completion_time  # I列
-            
-            update_sheet_row(project_key, row_data, updates)
-            st.success(f"{posts_completed}記事の投稿が完了しました")
-            return True
-        else:
-            st.error("投稿に失敗しました")
-            return False
+        st.success(f"{posts_completed}記事の投稿が完了しました")
+        return True
         
     except Exception as e:
         st.error(f"投稿処理エラー: {e}")
