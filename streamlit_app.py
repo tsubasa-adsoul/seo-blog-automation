@@ -7,29 +7,37 @@ K列予約投稿実行スクリプト（GitHub Actions用）
 - 非WordPressプラットフォーム専用（Seesaa、FC2、livedoor、Blogger）
 """
 
-import os
-import re
-import json
-import time
-import random
-import logging
+import streamlit as st
 import requests
 import gspread
+import time
+import random
 import xmlrpc.client
-import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional
-from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 from requests.auth import HTTPBasicAuth
-from xml.sax.saxutils import escape as xml_escape
+import json
+import re
+import pandas as pd
+from urllib.parse import urlparse
 import tempfile
-import argparse
-import pickle
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+import os
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
+import io
+from PIL import Image, ImageDraw, ImageFont
+
+# Blogger関連のimportは条件付きで行う
+try:
+    import pickle
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
+    BLOGGER_AVAILABLE = True
+except ImportError:
+    BLOGGER_AVAILABLE = False
+    st.warning("Blogger投稿機能を使用するには追加ライブラリが必要です")
 
 # ----------------------------
 # ログ設定
@@ -801,3 +809,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
