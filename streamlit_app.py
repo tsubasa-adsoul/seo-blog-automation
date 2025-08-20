@@ -79,14 +79,14 @@ PROJECT_CONFIGS = {
 # WordPress設定
 WP_CONFIGS = {
     'ykikaku': {
-        'url': 'https://ykikaku.xsrv.jp/',
+        'url': 'https://ykikaku.v2006.coreserver.jp/',
         'user': 'ykikaku',
-        'password': 'lfXp BJNx Rvy8 rBlt Yjug ADRn'
+        'password': 'QnV8 5VlW RwZN YV4P zAcl Gfce'
     },
     'efdlqjtz': {
-        'url': 'https://www.efdlqjtz.v2010.coreserver.jp/',
+        'url': 'https://www.efdlqjtz.com/',
         'user': 'efdlqjtz',
-        'password': 'KCIA cTyz TcdG U1Qs M4pd eezb'
+        'password': 'nJh6 Gqm6 qfPn T6Zu WQGV Aymx'
     },
     'selectadvance': {
         'url': 'https://selectadvance.v2006.coreserver.jp/',
@@ -99,24 +99,24 @@ WP_CONFIGS = {
         'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
     },
     'ncepqvub': {
-        'url': 'https://ncepqvub.v2009.coreserver.jp/',
+        'url': 'https://www.ncepqvub.com/',
         'user': 'ncepqvub',
-        'password': 'DIZy ky10 UAhO NJ47 6Jww ImdE'
+        'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
     },
     'kosagi': {
         'url': 'https://www.kosagi.jp/',
-        'user': 'kosagi',  # 後で設定
-        'password': 'K2DZ ERIy aTLb K2Z0 gHi6 XdIN'  # 後で設定
+        'user': 'kosagi',
+        'password': 'VsGS VU5J cKx8 HM6p oLEb VdNH'
     },
     'selectad': {
-        'url': 'https://selectad01.xsrv.jp/',
-        'user': 'selectad01',
-        'password': '8LhM laXm pDUx gkjV cg1f EXYr'
+        'url': 'https://selectad.v2006.coreserver.jp/',
+        'user': 'selectad',
+        'password': 'xVA8 6yxD TdkP CJE4 yoQN qAHn'
     },
     'thrones': {
         'url': 'https://thrones.v2009.coreserver.jp/',
         'user': 'thrones',
-        'password': 'ETvJ VP2F jugd mxXU xJX0 wHVr'
+        'password': 'Fz9k fB3y wJuN tL8m zPqX vR4s'
     }
 }
 
@@ -380,11 +380,18 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     
     # フォント設定（フォールバック対応）
     try:
-        title_font = ImageFont.truetype("arial.ttf", 28)
-        subtitle_font = ImageFont.truetype("arial.ttf", 20)
+        # 日本語フォントを優先的に試す
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+        subtitle_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
     except:
-        title_font = ImageFont.load_default()
-        subtitle_font = ImageFont.load_default()
+        try:
+            # Windows環境での日本語フォント
+            title_font = ImageFont.truetype("msgothic.ttc", 28)
+            subtitle_font = ImageFont.truetype("msgothic.ttc", 20)
+        except:
+            # デフォルトフォント（ASCII文字のみ対応）
+            title_font = ImageFont.load_default()
+            subtitle_font = ImageFont.load_default()
     
     # タイトルを描画（改行対応）
     lines = []
@@ -1195,18 +1202,21 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     if 'wordpress' in platforms:
                         # WordPress投稿（予約投稿対応）
                         for site_key in config.get('wp_sites', []):
-                            if not post_target or post_target in [site_key, '両方']:
-                                add_realtime_log(f"📤 {site_key}に投稿中...")
-                                post_url = post_to_wordpress(
-                                    article, 
-                                    site_key, 
-                                    category, 
-                                    schedule_dt, 
-                                    enable_eyecatch
-                                )
-                                if post_url:
-                                    posted_urls.append(post_url)
-                                    add_realtime_log(f"✅ {site_key}投稿成功")
+                            # 投稿先が指定されている場合は、その投稿先のみに投稿
+                            if post_target and post_target != '両方' and post_target != site_key:
+                                continue
+                            # 投稿先が未指定または「両方」の場合は全サイトに投稿
+                            add_realtime_log(f"📤 {site_key}に投稿中...")
+                            post_url = post_to_wordpress(
+                                article, 
+                                site_key, 
+                                category, 
+                                schedule_dt, 
+                                enable_eyecatch
+                            )
+                            if post_url:
+                                posted_urls.append(post_url)
+                                add_realtime_log(f"✅ {site_key}投稿成功")
                     
                     elif 'seesaa' in platforms:
                         # Seesaa投稿
@@ -1343,11 +1353,16 @@ def main():
         
         # リアルタイムログ表示
         if st.session_state.realtime_logs:
-            with st.expander("📋 リアルタイム進行状況", expanded=True):
+            with st.expander("進行状況ログ", expanded=True):
                 log_container = st.container()
                 with log_container:
-                    for log in st.session_state.realtime_logs[-10:]:  # 最新10件
+                    for log in st.session_state.realtime_logs:
                         st.text(log)
+                
+                # ログクリアボタン
+                if st.button("ログクリア"):
+                    st.session_state.realtime_logs = []
+                    st.rerun()
     
     # プロジェクト変更検知
     current_project = st.session_state.get('current_project')
@@ -1644,4 +1659,3 @@ jobs:
 
 if __name__ == "__main__":
     main()
-
