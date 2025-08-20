@@ -1344,7 +1344,8 @@ def main():
                         st.text(log)
     
     # プロジェクト変更検知
-    if st.session_state.get('current_project') != project_key and project_key not in st.session_state.posting_projects:
+    current_project = st.session_state.get('current_project')
+    if current_project != project_key and project_key not in st.session_state.posting_projects:
         st.session_state.current_project = project_key
         st.cache_data.clear()  # プロジェクト変更時にキャッシュクリア
     
