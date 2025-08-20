@@ -21,6 +21,7 @@ from xml.sax.saxutils import escape as xml_escape
 import io
 from PIL import Image, ImageDraw, ImageFont
 import base64
+from pathlib import Path
 
 # ==============
 # 可用ライブラリ検出（Blogger系）
@@ -130,24 +131,40 @@ def generate_slug_from_title(title):
 # ========================
 # アイキャッチ自動生成（完全版）
 # ========================
+def _jp_font(size: int) -> ImageFont.FreeTypeFont:
+    """
+    日本語フォント解決（同梱フォント最優先 / 各環境フォールバック）
+    """
+    candidates = [
+        Path(__file__).parent / "fonts" / "NotoSansJP-Bold.ttf",  # 同梱（最優先）
+        Path("fonts") / "NotoSansJP-Bold.ttf",                    # 実行ディレクトリ直下
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", # Linuxにあれば
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",    # Linuxにあれば
+        "C:/Windows/Fonts/meiryo.ttc",                            # Windows
+        "C:/Windows/Fonts/meiryob.ttc",                           # Windows（太字）
+    ]
+    for p in candidates:
+        try:
+            return ImageFont.truetype(str(p), size)
+        except Exception:
+            continue
+    # 最終フォールバック（英数のみになる可能性あり）
+    return ImageFont.load_default()
+    
 def create_eyecatch_image(title: str, site_key: str) -> bytes:
-    """タイトルからアイキャッチ画像を自動生成（Cloud環境対応）"""
-    
-    # 画像サイズ
+    """タイトルからアイキャッチ画像を自動生成（Cloud対応・サイト別カラー・サイト名非表示）"""
     width, height = 600, 400
-    
-    # カラーパレット（サイト別）
+
+    # サイト別カラー（赤：ncepqvub/kosagi、他：緑）
     if site_key in ['ncepqvub', 'kosagi']:
-        # 赤系カラー（赤いサイト用）
         color_schemes = [
-            {'bg': '#B71C1C', 'accent': '#EF5350', 'text': '#FFFFFF'},  # 深紅×ライトレッド
-            {'bg': '#C62828', 'accent': '#FF5252', 'text': '#FFFFFF'},  # レッド×明るいレッド
-            {'bg': '#D32F2F', 'accent': '#FF8A80', 'text': '#FFFFFF'},  # 標準レッド×薄いレッド
-            {'bg': '#E53935', 'accent': '#FFCDD2', 'text': '#FFFFFF'},  # 明るいレッド×ピンクレッド
-            {'bg': '#8B0000', 'accent': '#DC143C', 'text': '#FFFFFF'},  # ダークレッド×クリムゾン
+            {'bg': '#B71C1C', 'accent': '#EF5350', 'text': '#FFFFFF'},
+            {'bg': '#C62828', 'accent': '#FF5252', 'text': '#FFFFFF'},
+            {'bg': '#D32F2F', 'accent': '#FF8A80', 'text': '#FFFFFF'},
+            {'bg': '#E53935', 'accent': '#FFCDD2', 'text': '#FFFFFF'},
+            {'bg': '#8B0000', 'accent': '#DC143C', 'text': '#FFFFFF'},
         ]
     else:
-        # 緑系カラー（他のサイト用）
         color_schemes = [
             {'bg': '#2E7D32', 'accent': '#66BB6A', 'text': '#FFFFFF'},
             {'bg': '#388E3C', 'accent': '#81C784', 'text': '#FFFFFF'},
@@ -155,42 +172,36 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
             {'bg': '#689F38', 'accent': '#AED581', 'text': '#FFFFFF'},
             {'bg': '#7CB342', 'accent': '#C5E1A5', 'text': '#2E7D32'},
         ]
-    
+
     scheme = random.choice(color_schemes)
-    
-    # 画像作成
+
     img = Image.new('RGB', (width, height), color=scheme['bg'])
     draw = ImageDraw.Draw(img)
-    
-    # 背景にグラデーション効果（簡易版）
+
+    # 簡易グラデーション
     for i in range(height):
         alpha = i / height
         r = int(int(scheme['bg'][1:3], 16) * (1 - alpha * 0.3))
         g = int(int(scheme['bg'][3:5], 16) * (1 - alpha * 0.3))
         b = int(int(scheme['bg'][5:7], 16) * (1 - alpha * 0.3))
         draw.rectangle([(0, i), (width, i + 1)], fill=(r, g, b))
-    
-    # 装飾的な図形を追加
-    # 左上の円
+
+    # 装飾円
     draw.ellipse([-50, -50, 150, 150], fill=scheme['accent'])
-    # 右下の円
-    draw.ellipse([width-100, height-100, width+50, height+50], fill=scheme['accent'])
-    
-    # ←ここを変更
+    draw.ellipse([width - 100, height - 100, width + 50, height + 50], fill=scheme['accent'])
+
+    # フォント（同梱NotoSansJPを最優先）
     title_font = _jp_font(28)
-    
-    # タイトルを描画（改行対応）
+
+    # 改行ロジック（あなたの実装を踏襲）
     lines = []
     if len(title) > 12:
-        # まず「！」や「？」で区切れるか確認
         for sep in ['！', '？', '…', '!', '?']:
             if sep in title:
                 idx = title.find(sep)
                 if idx > 0:
-                    lines = [title[:idx+1], title[idx+1:].strip()]
+                    lines = [title[:idx + 1], title[idx + 1:].strip()]
                     break
-        
-        # 「！」「？」で区切れなかった場合は、句読点や助詞で区切る
         if not lines:
             for sep in ['と', '、', 'の', 'は', 'が', 'を', 'に', '…', 'で']:
                 if sep in title:
@@ -198,42 +209,32 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
                     if 5 < idx < len(title) - 5:
                         lines = [title[:idx], title[idx:]]
                         break
-        
-        # それでも区切れない場合は中央で分割
         if not lines:
             mid = len(title) // 2
             lines = [title[:mid], title[mid:]]
     else:
         lines = [title]
-    
-    # 中央にタイトルを配置（サイト名がないので完全中央）
+
+    # タイトル中央配置（サイト名は描かない）
     y_start = (height - len(lines) * 50) // 2
-    
     for i, line in enumerate(lines):
-        # テキストサイズを取得
         try:
             bbox = draw.textbbox((0, 0), line, font=title_font)
             text_width = bbox[2] - bbox[0]
         except AttributeError:
             text_width, _ = draw.textsize(line, font=title_font)
-        
         x = (width - text_width) // 2
         y = y_start + i * 50
-        
-        # 影
-        draw.text((x + 2, y + 2), line, font=title_font, fill=(0, 0, 0))
-        # 本体
-        draw.text((x, y), line, font=title_font, fill=scheme['text'])
-    
+        draw.text((x + 2, y + 2), line, font=title_font, fill=(0, 0, 0))     # 影
+        draw.text((x, y), line, font=title_font, fill=scheme['text'])        # 本体
+
     # 上部ライン
-    draw.rectangle([50, 40, width-50, 42], fill=scheme['text'])
-    
-    # バイトデータとして返す
-    img_byte_arr = io.BytesIO()
-    img.save(img_byte_arr, format='JPEG', quality=90)
-    img_byte_arr.seek(0)
-    
-    return img_byte_arr.getvalue()
+    draw.rectangle([50, 40, width - 50, 42], fill=scheme['text'])
+
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG', quality=90)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 # post_to_wordpress関数（完全版・2段階処理）
@@ -242,107 +243,90 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     if site_key not in WP_CONFIGS:
         add_notification(f"不明なサイト: {site_key}", "error", project_key)
         return ""
-    
+
     site_config = WP_CONFIGS[site_key]
-    
-    # ベースURLの正規化（スキーム保持）
+
+    # ベースURLの正規化
     base_url = site_config['url']
     if not base_url.startswith(('http://', 'https://')):
         base_url = 'https://' + base_url
     if not base_url.endswith('/'):
         base_url += '/'
-    
-    # デバッグ情報
     add_notification(f"ベースURL: {base_url}", "info", project_key)
-    
-    # kosagi: XMLRPCで即時 or 待機→即時
+
+    # -------------------------------
+    # kosagi：REST不可・数字パーマリンク想定 → XML-RPC 最小投稿
+    # -------------------------------
     if site_key == 'kosagi':
+        # 予約が未来なら待機（UI仕様踏襲）
         if schedule_dt and schedule_dt > datetime.now():
             wait_seconds = max(0, int((schedule_dt - datetime.now()).total_seconds()))
             add_notification(f"kosagi待機: {wait_seconds}秒", "info", project_key)
             progress_bar = st.progress(0)
             total = max(wait_seconds, 1)
             for i in range(wait_seconds):
-                progress_bar.progress((i+1)/total)
+                progress_bar.progress((i + 1) / total)
                 time.sleep(1)
             add_notification("kosagi投稿開始", "success", project_key)
-        
-        endpoint = f"{base_url}xmlrpc.php"
-        import html
-        escaped_title = html.escape(article_data['title'])
-        
-        # XMLRPCでもスラッグを設定
-        slug = generate_slug_from_title(article_data['title'])
-        add_notification(f"XMLRPC用スラッグ生成: {slug}", "info", project_key)
-        
-        xml_request = f"""<?xml version="1.0" encoding="UTF-8"?>
-<methodCall>
-    <methodName>wp.newPost</methodName>
-    <params>
-        <param><value><int>0</int></value></param>
-        <param><value><string>{site_config['user']}</string></value></param>
-        <param><value><string>{site_config['password']}</string></value></param>
-        <param>
-            <value>
-                <struct>
-                    <member><name>post_type</name><value><string>post</string></value></member>
-                    <member><name>post_status</name><value><string>publish</string></value></member>
-                    <member><name>post_title</name><value><string>{escaped_title}</string></value></member>
-                    <member><name>post_content</name><value><string><![CDATA[{article_data['content']}]]></string></value></member>
-                    <member><name>wp_slug</name><value><string>{slug}</string></value></member>
-                </struct>
-            </value>
-        </param>
-    </params>
-</methodCall>"""
+
         try:
+            endpoint = f"{base_url}xmlrpc.php"
+            server = xmlrpc.client.ServerProxy(endpoint, allow_none=True, use_builtin_types=True)
+
+            # 最小フィールドのみ（WAF回避策：スラッグ/アイキャッチ/メタ類は一切送らない）
+            content_struct = {
+                'title': article_data['title'],
+                'description': article_data['content'],
+                'post_status': 'publish',  # 即時公開
+            }
             add_notification("kosagi XMLRPC投稿...", "info", project_key)
-            response = requests.post(
-                endpoint, data=xml_request.encode('utf-8'),
-                headers={'Content-Type':'text/xml; charset=UTF-8','User-Agent':'WordPress XML-RPC Client'},
-                timeout=60
-            )
-            if response.status_code == 200:
-                if '<name>faultCode</name>' in response.text:
-                    fault_match = re.search(r'<name>faultString</name>.*?<string>(.*?)</string>', response.text, re.DOTALL)
-                    fault_msg = fault_match.group(1) if fault_match else "不明なエラー"
-                    add_notification(f"kosagi XMLRPC投稿エラー: {fault_msg}", "error", project_key)
-                    return ""
-                match = re.search(r'<string>(\d+)</string>', response.text)
-                if match:
-                    post_id = match.group(1)
-                    post_url = f"{base_url}{slug}/"  # スラッグベースのURL
-                    add_notification(f"kosagi投稿成功: {post_url}", "success", project_key)
-                    return post_url
-                add_notification("kosagi投稿成功 (ID抽出失敗)", "success", project_key)
-                return base_url
-            else:
-                add_notification(f"kosagi投稿失敗: HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
-                return ""
-        except Exception as e:
-            add_notification(f"kosagi投稿エラー: {e}", "error", project_key)
+
+            # WordPressのblog_idは通常0でOK
+            post_id = server.metaWeblog.newPost('0', site_config['user'], site_config['password'], content_struct, True)
+
+            # パーマリンク取得（数字パーマリンクでもOK）
+            post_url = ""
+            try:
+                info = server.metaWeblog.getPost(post_id, site_config['user'], site_config['password'])
+                post_url = info.get('permalink') or info.get('link') or ""
+            except Exception:
+                pass
+            if not post_url:
+                # 最終手段：?p=ID 形式を組み立て
+                post_url = f"{base_url}?p={post_id}"
+
+            add_notification(f"kosagi投稿成功: {post_url}", "success", project_key)
+            return post_url
+
+        except xmlrpc.client.Fault as fault:
+            add_notification(f"kosagi XMLRPC Fault: {fault.faultString}", "error", project_key)
             return ""
-    
-    # 通常WP: REST API（2段階処理：投稿→スラッグ更新）
+        except Exception as e:
+            add_notification(f"kosagi XMLRPC投稿エラー: {e}", "error", project_key)
+            return ""
+
+    # -------------------------------
+    # 通常WPサイト：REST API（下書き→スラッグ更新→公開）
+    # -------------------------------
     endpoint = f"{base_url}wp-json/wp/v2/posts"
     add_notification(f"REST API エンドポイント: {endpoint}", "info", project_key)
-    
-    # スラッグの自動生成
+
+    # スラッグ自動生成
     slug = generate_slug_from_title(article_data['title'])
     add_notification(f"生成スラッグ: {slug}", "info", project_key)
-    
+
     post_data = {
-        'title': article_data['title'], 
-        'content': article_data['content'], 
-        'status': 'draft',  # まず下書きで作成
+        'title': article_data['title'],
+        'content': article_data['content'],
+        'status': 'draft',
         'slug': slug
     }
-    
+
     # カテゴリー設定
     if category_name:
         try:
             categories_endpoint = f"{base_url}wp-json/wp/v2/categories"
-            cat_response = requests.get(categories_endpoint)
+            cat_response = requests.get(categories_endpoint, timeout=30)
             if cat_response.status_code == 200:
                 categories = cat_response.json()
                 for cat in categories:
@@ -352,19 +336,21 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                         break
         except Exception as e:
             add_notification(f"カテゴリー設定エラー: {e}", "warning", project_key)
-    
-    # アイキャッチ処理
+
+    # アイキャッチ（RESTサイトのみ）
     if enable_eyecatch:
         try:
             add_notification(f"アイキャッチ生成: {site_key}", "info", project_key)
             eyecatch_data = create_eyecatch_image(article_data['title'], site_key)
             media_endpoint = f"{base_url}wp-json/wp/v2/media"
             add_notification(f"メディア エンドポイント: {media_endpoint}", "info", project_key)
-            
             files = {'file': ('eyecatch.jpg', eyecatch_data, 'image/jpeg')}
             media_data = {'title': f"アイキャッチ: {article_data['title'][:30]}...", 'alt_text': article_data['title']}
-            media_response = requests.post(media_endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
-                                           files=files, data=media_data, timeout=60)
+            media_response = requests.post(
+                media_endpoint,
+                auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+                files=files, data=media_data, timeout=60
+            )
             if media_response.status_code == 201:
                 media_info = media_response.json()
                 post_data['featured_media'] = media_info['id']
@@ -373,44 +359,52 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 add_notification(f"アイキャッチUP失敗 ({site_key}): {media_response.status_code}", "warning", project_key)
         except Exception as e:
             add_notification(f"アイキャッチ処理エラー ({site_key}): {e}", "warning", project_key)
-    
+
     try:
-        # Step 1: 下書きで投稿作成
+        # Step1: 下書き作成
         add_notification(f"{site_key}下書き投稿開始", "info", project_key)
-        response = requests.post(endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
-                                 headers={'Content-Type':'application/json'}, data=json.dumps(post_data), timeout=60)
-        
+        response = requests.post(
+            endpoint,
+            auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+            headers={'Content-Type': 'application/json'},
+            data=json.dumps(post_data),
+            timeout=60
+        )
+
         if response.status_code in (200, 201):
             try:
                 post_data_response = response.json()
                 post_id = post_data_response['id']
                 add_notification(f"下書き作成成功 (ID: {post_id})", "success", project_key)
-                
-                # Step 2: スラッグを強制更新して公開
+
+                # Step2: スラッグ固定＋公開（または予約）
                 update_endpoint = f"{base_url}wp-json/wp/v2/posts/{post_id}"
-                
                 update_data = {
                     'slug': slug,
                     'status': 'future' if (schedule_dt and schedule_dt > datetime.now()) else 'publish'
                 }
-                
                 if schedule_dt and schedule_dt > datetime.now():
                     update_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
                     add_notification(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}", "info", project_key)
-                
+
                 add_notification(f"スラッグ更新＆公開処理: {slug}", "info", project_key)
-                update_response = requests.post(update_endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
-                                               headers={'Content-Type':'application/json'}, data=json.dumps(update_data), timeout=60)
-                
+                update_response = requests.post(
+                    update_endpoint,
+                    auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+                    headers={'Content-Type': 'application/json'},
+                    data=json.dumps(update_data),
+                    timeout=60
+                )
+
                 if update_response.status_code in (200, 201):
                     final_data = update_response.json()
                     post_url = final_data.get('link', '')
-                    
-                    # URLを手動構築（確実にスラッグベースにする）
-                    if not post_url or '%' in post_url:  # 日本語URLエンコードされている場合
+
+                    # URLを手動構築（念のため）
+                    if not post_url or '%' in post_url:
                         post_url = f"{base_url}{slug}/"
                         add_notification(f"URL手動構築: {post_url}", "info", project_key)
-                    
+
                     if schedule_dt and schedule_dt > datetime.now():
                         add_notification(f"予約投稿成功 ({site_key}): {post_url}", "success", project_key)
                     else:
@@ -419,7 +413,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 else:
                     add_notification(f"スラッグ更新失敗: HTTP {update_response.status_code}", "error", project_key)
                     return ""
-                    
+
             except Exception as e:
                 add_notification(f"{site_key}投稿後処理エラー: {e}", "error", project_key)
                 return ""
@@ -431,7 +425,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             add_notification(f"{site_key}API未有効/URL誤り(404)", "error", project_key)
         else:
             try:
-                msg = response.json().get('message','Unknown')
+                msg = response.json().get('message', 'Unknown')
             except Exception:
                 msg = response.text[:300]
             add_notification(f"{site_key}投稿失敗: HTTP {response.status_code} - {msg}", "error", project_key)
@@ -439,7 +433,6 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     except Exception as e:
         add_notification(f"{site_key}投稿エラー: {e}", "error", project_key)
         return ""
-
 
 # ========================
 # ページ設定
@@ -1582,6 +1575,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
