@@ -76,17 +76,16 @@ PROJECT_CONFIGS = {
     }
 }
 
-# WordPress設定
 WP_CONFIGS = {
     'ykikaku': {
-        'url': 'https://ykikaku.v2006.coreserver.jp/',
+        'url': 'https://ykikaku.xsrv.jp/',
         'user': 'ykikaku',
-        'password': 'QnV8 5VlW RwZN YV4P zAcl Gfce'
+        'password': 'lfXp BJNx Rvy8 rBlt Yjug ADRn'
     },
     'efdlqjtz': {
-        'url': 'https://www.efdlqjtz.com/',
+        'url': 'https://www.efdlqjtz.v2010.coreserver.jp/',
         'user': 'efdlqjtz',
-        'password': 'nJh6 Gqm6 qfPn T6Zu WQGV Aymx'
+        'password': 'KCIA cTyz TcdG U1Qs M4pd eezb'
     },
     'selectadvance': {
         'url': 'https://selectadvance.v2006.coreserver.jp/',
@@ -99,24 +98,24 @@ WP_CONFIGS = {
         'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
     },
     'ncepqvub': {
-        'url': 'https://www.ncepqvub.com/',
+        'url': 'https://ncepqvub.v2009.coreserver.jp/',
         'user': 'ncepqvub',
-        'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
+        'password': 'DIZy ky10 UAhO NJ47 6Jww ImdE'
     },
     'kosagi': {
         'url': 'https://www.kosagi.jp/',
-        'user': 'kosagi',
-        'password': 'VsGS VU5J cKx8 HM6p oLEb VdNH'
+        'user': 'kosagi',  # 後で設定
+        'password': 'K2DZ ERIy aTLb K2Z0 gHi6 XdIN'  # 後で設定
     },
     'selectad': {
-        'url': 'https://selectad.v2006.coreserver.jp/',
-        'user': 'selectad',
-        'password': 'xVA8 6yxD TdkP CJE4 yoQN qAHn'
+        'url': 'https://selectad01.xsrv.jp/',
+        'user': 'selectad01',
+        'password': '8LhM laXm pDUx gkjV cg1f EXYr'
     },
     'thrones': {
         'url': 'https://thrones.v2009.coreserver.jp/',
         'user': 'thrones',
-        'password': 'Fz9k fB3y wJuN tL8m zPqX vR4s'
+        'password': 'ETvJ VP2F jugd mxXU xJX0 wHVr'
     }
 }
 
@@ -1663,3 +1662,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
