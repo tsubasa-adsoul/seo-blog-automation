@@ -501,7 +501,12 @@ def _get_gemini_key():
 def call_gemini(prompt: str) -> str:
     api_key = _get_gemini_key()
     endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}'
-    payload = {"contents": [{"parts": [{"text": prompt}]}]], "generationConfig": {"temperature": 0.7}}
+    payload = {
+    "contents": [
+        {"parts": [{"text": prompt}]}
+    ],
+    "generationConfig": {"temperature": 0.7}
+}
     response = requests.post(endpoint, json=payload, timeout=60)
     if response.status_code != 200:
         raise Exception(f"Gemini API エラー: {response.status_code} / {response.text[:200]}")
@@ -1329,3 +1334,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
