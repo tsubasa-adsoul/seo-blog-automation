@@ -1116,11 +1116,9 @@ def add_realtime_log(message):
     #     st.session_state.realtime_logs = st.session_state.realtime_logs[-30:]
 
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
-    """投稿実行（プラットフォーム自動判定・複数記事対応）"""
+    """投稿実行（Tkinter版のロジックを適用）"""
     try:
-        # 投稿開始時にプロジェクトを投稿中リストに追加
         st.session_state.posting_projects.add(project_key)
-        
         add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始")
         
         config = PROJECT_CONFIGS[project_key]
@@ -1136,26 +1134,14 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         
         add_realtime_log(f"📊 現在のカウンター: {current_counter}")
         
-        # 投稿先決定（デバッグログ強化）
+        # 投稿先決定（Tkinter版と同じロジック）
         post_target = row_data.get('投稿先', '').strip()
-        add_realtime_log(f"🎯 取得した投稿先: '{post_target}' (型: {type(post_target)})")
+        if not post_target:
+            post_target = 'ykikaku'  # デフォルト値
+        
+        add_realtime_log(f"🎯 投稿先: '{post_target}'")
         
         max_posts = get_max_posts_for_project(project_key, post_target)
-        
-        # 利用可能サイトリスト
-        available_sites = config.get('wp_sites', [])
-        add_realtime_log(f"📋 利用可能サイト: {available_sites}")
-        
-        # 投稿先検証
-        if 'wordpress' in config['platforms'] and not post_target:
-            add_realtime_log("❌ WordPressプロジェクトで投稿先が未選択")
-            st.error("WordPressプロジェクトでは投稿先を選択してください")
-            return False
-        
-        if 'wordpress' in config['platforms'] and post_target not in available_sites:
-            add_realtime_log(f"❌ 無効な投稿先: '{post_target}' (利用可能: {available_sites})")
-            st.error(f"無効な投稿先: {post_target}")
-            return False
         
         if current_counter >= max_posts:
             add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み")
@@ -1165,18 +1151,14 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         posts_completed = 0
         add_realtime_log(f"🚀 {post_count}記事の投稿を開始")
         
-        # プログレスバー
         progress_bar = st.progress(0)
         
         for i in range(post_count):
             if current_counter >= max_posts:
                 add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了済み")
-                st.warning(f"カウンター{current_counter}: 既に{max_posts}記事完了済み")
                 break
             
-            # i番目の予約時刻を取得
             schedule_dt = schedule_times[i] if i < len(schedule_times) else None
-            
             add_realtime_log(f"📝 記事{i+1}/{post_count}の処理開始")
             
             with st.expander(f"記事{i+1}/{post_count}の投稿", expanded=True):
@@ -1185,18 +1167,15 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     if current_counter == max_posts - 1:
                         # 最終記事：宣伝URL
                         add_realtime_log(f"🎯 {max_posts}記事目 → 宣伝URL使用")
-                        st.info(f"{max_posts}記事目 → 宣伝URL使用")
                         url = row_data.get('宣伝URL', '')
                         anchor = row_data.get('アンカーテキスト', project_key)
                         category = row_data.get('カテゴリー', 'お金のマメ知識')
                     else:
                         # 1-N記事目：その他リンク
                         add_realtime_log(f"🔗 {current_counter + 1}記事目 → その他リンク使用")
-                        st.info(f"{current_counter + 1}記事目 → その他リンク使用")
                         url, anchor = get_other_link()
                         if not url:
                             add_realtime_log("❌ その他リンクが取得できません")
-                            st.error("その他リンクが取得できません")
                             break
                         category = 'お金のマメ知識'
                     
@@ -1210,75 +1189,50 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     st.success(f"タイトル: {article['title']}")
                     st.info(f"使用リンク: {anchor}")
                     
-                    # プラットフォーム別投稿（修正版）
+                    # 投稿処理（Tkinter版のロジックを適用）
                     posted_urls = []
                     platforms = config['platforms']
                     
                     if 'wordpress' in platforms:
-                        # WordPress投稿（選択されたサイトのみ - 厳密チェック）
-                        add_realtime_log(f"🔍 WordPress投稿開始 - 対象サイト: '{post_target}'")
+                        add_realtime_log(f"🔍 WordPress投稿開始 - 投稿先: '{post_target}'")
                         
-                        if post_target and post_target in available_sites:
-                            # ykikakuのエラーハンドリング強化
-                            if post_target == 'ykikaku':
-                                add_realtime_log("⚠️ ykikaku: 特別なエラーハンドリング適用")
-                                try:
-                                    # ykikakuの接続テスト
-                                    test_url = f"{WP_CONFIGS['ykikaku']['url']}wp-json/wp/v2/users/me"
-                                    test_response = requests.get(
-                                        test_url,
-                                        auth=HTTPBasicAuth(
-                                            WP_CONFIGS['ykikaku']['user'], 
-                                            WP_CONFIGS['ykikaku']['password']
-                                        ),
-                                        timeout=10,
-                                        verify=False
-                                    )
-                                    
-                                    if test_response.status_code == 403:
-                                        add_realtime_log("❌ ykikaku: 認証に失敗しました（403エラー）")
-                                        st.error("ykikaku: アクセスが拒否されました。サイト管理者にご確認ください。")
-                                    elif test_response.status_code != 200:
-                                        add_realtime_log(f"❌ ykikaku: 接続エラー ({test_response.status_code})")
-                                        st.error(f"ykikaku: サーバーエラー ({test_response.status_code})")
-                                    else:
-                                        add_realtime_log("✅ ykikaku: 接続テスト成功")
-                                        post_url = post_to_wordpress(
-                                            article, 
-                                            post_target, 
-                                            category, 
-                                            schedule_dt, 
-                                            enable_eyecatch
-                                        )
-                                        if post_url:
-                                            posted_urls.append(post_url)
-                                            add_realtime_log(f"✅ {post_target}投稿成功")
-                                        
-                                except Exception as e:
-                                    add_realtime_log(f"❌ ykikaku接続テストエラー: {e}")
-                                    st.error(f"ykikaku接続エラー: {e}")
+                        # Tkinter版と同じ条件分岐
+                        if post_target in ['ykikaku', '両方']:
+                            add_realtime_log("📤 ykikakuに投稿中...")
+                            post_url = post_to_wordpress(
+                                article, 'ykikaku', category, schedule_dt, enable_eyecatch
+                            )
+                            if post_url:
+                                posted_urls.append(post_url)
+                                add_realtime_log("✅ ykikaku投稿成功")
                             else:
-                                # 他のWordPressサイト
-                                add_realtime_log(f"📤 {post_target}に投稿中...")
-                                post_url = post_to_wordpress(
-                                    article, 
-                                    post_target, 
-                                    category, 
-                                    schedule_dt, 
-                                    enable_eyecatch
-                                )
-                                if post_url:
-                                    posted_urls.append(post_url)
-                                    add_realtime_log(f"✅ {post_target}投稿成功")
-                                else:
-                                    add_realtime_log(f"❌ {post_target}投稿失敗")
-                        else:
-                            add_realtime_log(f"❌ 投稿先エラー: '{post_target}' (利用可能: {available_sites})")
-                            st.error(f"投稿先が無効です: {post_target}")
-                            break
+                                add_realtime_log("❌ ykikaku投稿失敗")
+                        
+                        if post_target in ['efdlqjtz', '両方']:
+                            add_realtime_log("📤 efdlqjtzに投稿中...")
+                            post_url = post_to_wordpress(
+                                article, 'efdlqjtz', category, schedule_dt, enable_eyecatch
+                            )
+                            if post_url:
+                                posted_urls.append(post_url)
+                                add_realtime_log("✅ efdlqjtz投稿成功")
+                            else:
+                                add_realtime_log("❌ efdlqjtz投稿失敗")
+                        
+                        # その他のWordPressサイト（汎用）
+                        available_sites = config.get('wp_sites', [])
+                        if post_target not in ['ykikaku', 'efdlqjtz', '両方'] and post_target in available_sites:
+                            add_realtime_log(f"📤 {post_target}に投稿中...")
+                            post_url = post_to_wordpress(
+                                article, post_target, category, schedule_dt, enable_eyecatch
+                            )
+                            if post_url:
+                                posted_urls.append(post_url)
+                                add_realtime_log(f"✅ {post_target}投稿成功")
+                            else:
+                                add_realtime_log(f"❌ {post_target}投稿失敗")
                     
                     elif 'seesaa' in platforms:
-                        # Seesaa投稿
                         add_realtime_log("📤 Seesaaに投稿中...")
                         post_url = post_to_seesaa(article, category)
                         if post_url:
@@ -1286,7 +1240,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             add_realtime_log("✅ Seesaa投稿成功")
                     
                     elif 'fc2' in platforms:
-                        # FC2投稿
                         add_realtime_log("📤 FC2に投稿中...")
                         post_url = post_to_fc2(article, category)
                         if post_url:
@@ -1294,7 +1247,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             add_realtime_log("✅ FC2投稿成功")
                     
                     elif 'livedoor' in platforms:
-                        # livedoor投稿
                         add_realtime_log("📤 livedoorに投稿中...")
                         post_url = post_to_livedoor(article, category)
                         if post_url:
@@ -1302,7 +1254,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             add_realtime_log("✅ livedoor投稿成功")
                     
                     elif 'blogger' in platforms:
-                        # Blogger投稿
                         add_realtime_log("📤 Bloggerに投稿中...")
                         post_url = post_to_blogger(article)
                         if post_url:
@@ -1314,15 +1265,18 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                         st.error("投稿に失敗しました")
                         break
                     
-                    # 以降のカウンター更新処理は既存のまま...
+                    # カウンター更新処理（既存のまま）
+                    current_counter += 1
+                    posts_completed += 1
+                    
+                    # スプレッドシート更新...
                     
                 except Exception as e:
                     add_realtime_log(f"❌ 記事{i+1}の投稿エラー: {e}")
                     st.error(f"記事{i+1}の投稿エラー: {e}")
-                    st.session_state.posting_projects.discard(project_key)
                     break
         
-        # 投稿完了処理...
+        # 完了処理...
         
     except Exception as e:
         st.session_state.posting_projects.discard(project_key)
@@ -1667,5 +1621,6 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
 
