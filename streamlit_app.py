@@ -620,20 +620,22 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     
     site_config = WP_CONFIGS[site_key]
     
-    # kosagi特別処理（XMLRPC方式）
+    # kosagi特別処理（時間まで待機してから即時投稿）
     if site_key == 'kosagi':
         if schedule_dt and schedule_dt > datetime.now():
             wait_seconds = (schedule_dt - datetime.now()).total_seconds()
-            st.info(f"kosagi用: {schedule_dt.strftime('%H:%M')}まで待機します（{int(wait_seconds)}秒）")
+            st.info(f"kosagi用: {schedule_dt.strftime('%Y/%m/%d %H:%M')}まで待機します（{int(wait_seconds)}秒）")
             
             progress_bar = st.progress(0)
-            for i in range(int(wait_seconds)):
-                progress_bar.progress((i + 1) / wait_seconds)
+            total_seconds = int(wait_seconds)
+            
+            for i in range(total_seconds):
+                progress_bar.progress((i + 1) / total_seconds)
                 time.sleep(1)
             
             st.success("予約時刻になりました。kosagiに投稿を開始します")
         
-        # XMLRPC方式で投稿
+        # XMLRPC方式で即時投稿
         endpoint = f"{site_config['url']}xmlrpc.php"
         
         import html
@@ -702,6 +704,64 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 
         except Exception as e:
             st.error(f"kosagi投稿エラー: {e}")
+            return ""
+    
+    # 他のサイト（通常のWordPress REST API）
+    else:
+        endpoint = f"{site_config['url']}wp-json/wp/v2/posts"
+        
+        post_data = {
+            'title': article_data['title'],
+            'content': article_data['content'],
+            'status': 'publish'
+        }
+        
+        # 予約投稿の設定
+        if schedule_dt and schedule_dt > datetime.now():
+            post_data['status'] = 'future'
+            post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
+            st.info(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
+        
+        try:
+            # DNS解決の問題に対処するため、リトライ機能を追加
+            import urllib3
+            from urllib3.util.retry import Retry
+            from requests.adapters import HTTPAdapter
+            
+            session = requests.Session()
+            retry_strategy = Retry(
+                total=3,
+                status_forcelist=[429, 500, 502, 503, 504],
+                method_whitelist=["HEAD", "GET", "OPTIONS", "POST"]
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            
+            response = session.post(
+                endpoint,
+                auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+                headers={'Content-Type': 'application/json'},
+                data=json.dumps(post_data),
+                timeout=60
+            )
+            
+            if response.status_code in (201, 200):
+                post_url = response.json().get('link', '')
+                if schedule_dt and schedule_dt > datetime.now():
+                    st.success(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
+                else:
+                    st.success(f"投稿成功 ({site_key}): {post_url}")
+                return post_url
+            else:
+                st.error(f"WordPress投稿失敗 ({site_key}): {response.status_code}")
+                return ""
+                
+        except Exception as e:
+            st.error(f"WordPress投稿エラー ({site_key}): {e}")
+            # DNS解決エラーの場合、詳細情報を表示
+            if "Failed to resolve" in str(e):
+                st.info(f"💡 {site_key}への接続に問題があります。Streamlit Cloud環境のネットワーク問題の可能性があります。")
             return ""
     
     # 他のサイト（通常のWordPress REST API）
@@ -1358,3 +1418,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
