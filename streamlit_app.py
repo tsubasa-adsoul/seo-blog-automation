@@ -1112,9 +1112,9 @@ def add_realtime_log(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
     log_message = f"[{timestamp}] {message}"
     st.session_state.realtime_logs.append(log_message)
-    # ログが多すぎる場合は古いものを削除
-    if len(st.session_state.realtime_logs) > 50:
-        st.session_state.realtime_logs = st.session_state.realtime_logs[-30:]
+    # ログ制限を削除してログが保持されるようにする
+    # if len(st.session_state.realtime_logs) > 50:
+    #     st.session_state.realtime_logs = st.session_state.realtime_logs[-30:]
 
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
     """投稿実行（プラットフォーム自動判定・複数記事対応）"""
@@ -1588,9 +1588,9 @@ def main():
                         )
                     
                     if success:
-                        time.sleep(2)
+                        # time.sleep(2)  # 削除：これがページ再実行の原因
                         st.cache_data.clear()
-                        st.rerun()
+                        # st.rerun() # 削除：これがログを消す原因
     
     with col_b:
         if st.button("データ更新", use_container_width=True):
