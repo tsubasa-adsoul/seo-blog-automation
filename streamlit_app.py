@@ -17,9 +17,18 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 
 # ========================
-# 設定値
+# 設定値（Secretsから取得）
 # ========================
-SHEET_ID = '1sV0r6LavB4BgU7jGaa5C-GdyogUpWr_y42a-tNZXuFo'
+# Streamlit Secretsから設定値を取得
+try:
+    SHEET_ID = st.secrets["google"]["spreadsheet_id"]
+    GEMINI_API_KEYS = [
+        st.secrets["google"]["gemini_api_key_1"],
+        st.secrets["google"]["gemini_api_key_2"],
+    ]
+except KeyError as e:
+    st.error(f"Secretsの設定が不足しています: {e}")
+    st.stop()
 
 # プロジェクト設定（完全版）
 PROJECT_CONFIGS = {
@@ -133,13 +142,6 @@ PLATFORM_CONFIGS = {
     }
 }
 
-# Gemini設定
-GEMINI_API_KEYS = [
-    'AIzaSyBCxQruA6WrmfZHoZ6pTBPRVqkALKvdsT0',
-    'AIzaSyA3HKEVX10B7HXCQYt7mlFZzSJiLE5fhHo',
-    'AIzaSyAiCODJAE32JYGCTzSKqO2zSp8y7qR0ABC'
-]
-
 # 投稿間隔（スパム回避）
 MIN_INTERVAL = 60
 MAX_INTERVAL = 120
@@ -207,23 +209,25 @@ if 'gemini_key_index' not in st.session_state:
 def get_sheets_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     
-    # Streamlit Secretsから認証情報を取得
-    creds_json = st.secrets.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    if not creds_json:
-        # 環境変数から取得（GitHub Actions用）
+    try:
+        # Streamlit Secretsから認証情報を取得（TOML形式）
+        if "gcp" in st.secrets:
+            gcp_info = st.secrets["gcp"]
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(gcp_info), scope)
+            return gspread.authorize(creds)
+    except Exception as e:
+        # GitHub Actions用フォールバック
         creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+        if creds_json:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                f.write(creds_json)
+                temp_path = f.name
+            creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
+            os.unlink(temp_path)
+            return gspread.authorize(creds)
     
-    if not creds_json:
-        st.error("Google認証情報が設定されていません。Secretsを確認してください。")
-        st.stop()
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        f.write(creds_json)
-        temp_path = f.name
-    creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
-    os.unlink(temp_path)
-    
-    return gspread.authorize(creds)
+    st.error("Google認証情報が設定されていません。Secretsの[gcp]セクションを確認してください。")
+    st.stop()
 
 # ========================
 # 競合他社・その他リンク管理
