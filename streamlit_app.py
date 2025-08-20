@@ -301,8 +301,6 @@ def normalize_target(value: str) -> str:
             return key
     return s  # 既に期待値ならそのまま
 
-
-
 # ========================
 # ユーティリティ
 # ========================
@@ -544,12 +542,11 @@ def call_gemini(prompt: str) -> str:
 
     # ここまで来たら失敗
     raise Exception(last_err or "Gemini API 呼び出しに失敗しました")
-# ==== PATCH END ====
+
 # ==== PATCH: cache wrapper ====
 @st.cache_data(ttl=1800)  # 30分キャッシュ
 def _cached_generate_article(theme: str, url: str, anchor: str) -> dict:
     return generate_article_with_link(theme, url, anchor)
-# ==== PATCH END ====
 
 def generate_article_with_link(theme: str, url: str, anchor_text: str) -> dict:
     auto_theme = False
@@ -912,8 +909,10 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         schedule_times = schedule_times or []
         current_counter = 0
         if 'カウンター' in row_data and row_data['カウンター']:
-            try: current_counter = int(row_data['カウンター'])
-            except Exception: current_counter = 0
+            try: 
+                current_counter = int(row_data['カウンター'])
+            except Exception: 
+                current_counter = 0
         add_realtime_log(f"📊 現在のカウンター: {current_counter}")
 
         # --- 投稿先決定（UI最優先） ---
@@ -927,7 +926,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
 
         max_posts = get_max_posts_for_project(project_key, desired_target)
         if current_counter >= max_posts:
-            add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み"); st.warning(f"既に{max_posts}記事完了しています")
+            add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み")
+            st.warning(f"既に{max_posts}記事完了しています")
             return False
 
         posts_completed = 0
@@ -935,7 +935,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
 
         for i in range(post_count):
             if current_counter >= max_posts:
-                add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了"); break
+                add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了")
+                break
 
             schedule_dt = schedule_times[i] if i < len(schedule_times) else None
             add_realtime_log(f"📝 記事{i+1}/{post_count}の処理開始")
@@ -952,7 +953,9 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                         add_realtime_log(f"🔗 {current_counter + 1}記事目 → その他リンク使用")
                         url, anchor = choose_other_link()
                         if not url:
-                            add_realtime_log("❌ その他リンクが取得できません"); st.error("その他リンクが取得できません"); break
+                            add_realtime_log("❌ その他リンクが取得できません")
+                            st.error("その他リンクが取得できません")
+                            break
                         category = 'お金のマメ知識'
 
                     # 記事生成
@@ -1026,13 +1029,13 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             else:
                                 add_realtime_log(f"❌ {t} 投稿失敗")
 
-    # 実際に投下するターゲット配列を決定
+                        # 実際に投下するターゲット配列を決定
                         if desired_target == 'both':
                             targets = [t for t in ['livedoor', 'blogger'] if t in valid_targets] or valid_targets[:]
                         elif desired_target in valid_targets:
                             targets = [desired_target]
                         else:
-        # フォールバック：この順で最初の存在プラットフォームへ
+                            # フォールバック：この順で最初の存在プラットフォームへ
                             fallback_order = [t for t in ['livedoor', 'blogger', 'seesaa', 'fc2'] if t in valid_targets]
                             targets = fallback_order[:1] if fallback_order else []
 
@@ -1041,9 +1044,10 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                         for t in targets:
                             do_post(t)
 
-
                     if not posted_urls:
-                        add_realtime_log("❌ 投稿に失敗しました"); st.error("投稿に失敗しました"); break
+                        add_realtime_log("❌ 投稿に失敗しました")
+                        st.error("投稿に失敗しました")
+                        break
 
                     # URLを画面に明示
                     st.success("投稿URL:")
@@ -1132,11 +1136,11 @@ def main():
         else:
             st.success("**予約方式**: WordPress予約投稿機能")
 
-# === 非WPのみ: UIで投稿先を明示指定できるように ===
+    # === 非WPのみ: UIで投稿先を明示指定できるように ===
     ui_override_target = ""
-    if 'wordpress' not in config['platforms']:
+    if 'wordpress' not in cfg['platforms']:
         st.subheader("投稿先（非WordPress）")
-        nonwp_targets = [p for p in ['livedoor', 'blogger', 'seesaa', 'fc2'] if p in config['platforms']]
+        nonwp_targets = [p for p in ['livedoor', 'blogger', 'seesaa', 'fc2'] if p in cfg['platforms']]
         # 先頭に「自動（シート値を使用）」を入れる
         opts_label = ['自動（シートの「投稿先」列を使用）'] + [t.upper() if t!='blogger' else 'Blogger' for t in nonwp_targets]
         choice = st.radio(
@@ -1146,12 +1150,9 @@ def main():
             help="ここで選ぶとシートの『投稿先』よりも優先されます"
         )
         if choice != '自動（シートの「投稿先」列を使用）':
-        # 表示ラベル→キー名へ逆変換
+            # 表示ラベル→キー名へ逆変換
             map_back = {('Blogger' if t=='blogger' else t.upper()): t for t in nonwp_targets}
             ui_override_target = map_back.get(choice, "")
-
-
-    
 
     # WP接続テスト
     if not cfg['needs_k_column']:
@@ -1172,7 +1173,8 @@ def main():
     # データ
     df = load_sheet_data(project_key)
     if df.empty:
-        st.info("未処理のデータがありません"); return
+        st.info("未処理のデータがありません")
+        return
 
     st.header("データ一覧")
     edited_df = st.data_editor(
@@ -1224,13 +1226,16 @@ def main():
                     try:
                         t = datetime.strptime(line, '%H:%M')
                         dt = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-                        if dt > now: schedule_times.append(dt)
-                        else: st.error(f"過去時刻: {line}")
+                        if dt > now: 
+                            schedule_times.append(dt)
+                        else: 
+                            st.error(f"過去時刻: {line}")
                     except ValueError:
                         st.error(f"無効な時刻形式: {line}")
                 if schedule_times:
                     st.success(f"予約時刻 {len(schedule_times)}件")
-                    for dt in schedule_times: st.write("• " + dt.strftime('%H:%M'))
+                    for dt in schedule_times: 
+                        st.write("• " + dt.strftime('%H:%M'))
                 if len(schedule_times) < post_count and enable_schedule:
                     st.warning(f"投稿数{post_count}に対して予約時刻が{len(schedule_times)}件")
     else:
@@ -1258,12 +1263,16 @@ def main():
                             break
                         except ValueError:
                             continue
-                    if dt and dt > now: schedule_times.append(dt)
-                    elif dt: st.error(f"過去の時刻は指定不可: {line}")
-                    else: st.error(f"無効な時刻形式: {line}")
+                    if dt and dt > now: 
+                        schedule_times.append(dt)
+                    elif dt: 
+                        st.error(f"過去の時刻は指定不可: {line}")
+                    else: 
+                        st.error(f"無効な時刻形式: {line}")
                 if schedule_times:
                     st.success(f"予約時刻 {len(schedule_times)}件")
-                    for dt in schedule_times: st.write("• " + dt.strftime('%Y/%m/%d %H:%M'))
+                    for dt in schedule_times: 
+                        st.write("• " + dt.strftime('%Y/%m/%d %H:%M'))
                 if len(schedule_times) < post_count and enable_schedule:
                     st.warning(f"投稿数{post_count}に対して予約時刻が{len(schedule_times)}件")
 
@@ -1295,14 +1304,16 @@ def main():
                     else:
                         if add_schedule_to_k_column(project_key, row, schedule_times):
                             st.success("K列に予約時刻を記録しました。GitHub Actionsで実行されます。")
-                            time.sleep(1.2); st.cache_data.clear(); st.rerun()
+                            time.sleep(1.2)
+                            st.cache_data.clear()
+                            st.rerun()
                 else:
                     ok = execute_post(
                         row, project_key,
                         post_count=post_count,
                         schedule_times=schedule_times if enable_schedule else [],
                         enable_eyecatch=enable_eyecatch,
-                        ui_override_target=ui_override_target  # ★追加
+                        ui_override_target=ui_override_target
                     )
                     if ok:
                         st.cache_data.clear()
@@ -1340,12 +1351,12 @@ jobs:
     # メトリクス
     st.markdown("---")
     c3, c4, c5 = st.columns(3)
-    with c3: st.metric("未処理件数", len(edited_df))
-    with c4: st.metric("プラットフォーム", len(cfg['platforms']))
-    with c5: st.metric("最終更新", datetime.now().strftime("%H:%M:%S"))
+    with c3: 
+        st.metric("未処理件数", len(edited_df))
+    with c4: 
+        st.metric("プラットフォーム", len(cfg['platforms']))
+    with c5: 
+        st.metric("最終更新", datetime.now().strftime("%H:%M:%S"))
 
 if __name__ == "__main__":
     main()
-
-
-
