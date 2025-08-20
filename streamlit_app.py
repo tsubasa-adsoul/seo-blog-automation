@@ -979,10 +979,18 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     if site_key not in WP_CONFIGS:
         add_notification(f"不明なサイト: {site_key}", "error", project_key)
         return ""
+    
     site_config = WP_CONFIGS[site_key]
     
-    # ベースURLの正規化（末尾スラッシュ確保）
-    base_url = site_config['url'].rstrip('/') + '/'
+    # ベースURLの正規化（スキーム保持）
+    base_url = site_config['url']
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = 'https://' + base_url
+    if not base_url.endswith('/'):
+        base_url += '/'
+    
+    # デバッグ情報
+    add_notification(f"ベースURL: {base_url}", "info", project_key)
     
     # kosagi: XMLRPCで即時 or 待機→即時
     if site_key == 'kosagi':
@@ -1048,6 +1056,8 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     
     # 通常WP: REST API
     endpoint = f"{base_url}wp-json/wp/v2/posts"
+    add_notification(f"REST API エンドポイント: {endpoint}", "info", project_key)
+    
     post_data = {'title': article_data['title'], 'content': article_data['content'], 'status': 'publish'}
     
     if schedule_dt and schedule_dt > datetime.now():
@@ -1060,6 +1070,8 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             add_notification(f"アイキャッチ生成: {site_key}", "info", project_key)
             eyecatch_data = create_eyecatch_image(article_data['title'], site_key)
             media_endpoint = f"{base_url}wp-json/wp/v2/media"
+            add_notification(f"メディア エンドポイント: {media_endpoint}", "info", project_key)
+            
             files = {'file': ('eyecatch.jpg', eyecatch_data, 'image/jpeg')}
             media_data = {'title': f"アイキャッチ: {article_data['title'][:30]}...", 'alt_text': article_data['title']}
             media_response = requests.post(media_endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
