@@ -198,7 +198,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ========================
 # セッションステート初期化
 # ========================
@@ -217,7 +216,6 @@ def add_realtime_log(message):
     # ログが多すぎる場合は古いものを削除
     if len(st.session_state.realtime_logs) > 10:
         st.session_state.realtime_logs.pop(0)
-
 
 # ========================
 # メイン関数
@@ -240,8 +238,9 @@ def main():
         "プロジェクト選択:",
         options=list(project_options.keys()),
         format_func=lambda x: project_options[x],
-        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
+        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,
         key="project_selector"
+    )
 
 # ========================
 # 認証 & シート取得
@@ -1644,5 +1643,6 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
 
