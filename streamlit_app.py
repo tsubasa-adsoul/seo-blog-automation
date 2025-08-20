@@ -1297,26 +1297,33 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # プロジェクト選択
+    # プロジェクト選択（シンプル版）
     project_key = st.selectbox(
         "プロジェクト選択",
         options=list(PROJECT_CONFIGS.keys()),
         format_func=lambda x: f"{PROJECT_CONFIGS[x]['worksheet']} ({', '.join(PROJECT_CONFIGS[x]['platforms'])})",
-        disabled=project_key in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
         key="project_selector"
     )
     
-    # 投稿中の警告表示（該当プロジェクトのみ）
-    if project_key in st.session_state.posting_projects:
+    # 投稿中チェック（プロジェクト選択後）
+    is_posting = project_key in st.session_state.get('posting_projects', set())
+    
+    if is_posting:
         st.warning(f"🚀 {PROJECT_CONFIGS[project_key]['worksheet']} 投稿処理中です。完了まで設定を変更しないでください。")
         
+        # 投稿中はプロジェクト選択を無効化
+        st.selectbox(
+            "プロジェクト選択（投稿中のため変更不可）",
+            options=[project_key],
+            disabled=True,
+            key="project_selector_locked"
+        )
+        
         # リアルタイムログ表示
-        if st.session_state.realtime_logs:
+        if st.session_state.get('realtime_logs'):
             with st.expander("📋 リアルタイム進行状況", expanded=True):
-                log_container = st.container()
-                with log_container:
-                    for log in st.session_state.realtime_logs[-10:]:  # 最新10件
-                        st.text(log)
+                for log in st.session_state.realtime_logs[-10:]:
+                    st.text(log)
     
     # プロジェクト変更検知
     if st.session_state.current_project != project_key and project_key not in st.session_state.posting_projects:
@@ -1612,3 +1619,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
