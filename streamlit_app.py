@@ -180,15 +180,12 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     try:
         # メイリオボールド（太字）で統一
         title_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 28)
-        subtitle_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 20)
     except:
         # フォールバック（通常のメイリオ）
         try:
             title_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 28)
-            subtitle_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 20)
         except:
             title_font = ImageFont.load_default()
-            subtitle_font = ImageFont.load_default()
     
     # タイトルを描画（改行対応）
     lines = []
@@ -217,7 +214,7 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     else:
         lines = [title]
     
-    # 中央にタイトルを配置
+    # 中央にタイトルを配置（サイト名がないので完全中央）
     y_start = (height - len(lines) * 50) // 2
     
     for i, line in enumerate(lines):
@@ -235,29 +232,6 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
         draw.text((x + 2, y + 2), line, font=title_font, fill=(0, 0, 0))
         # 本体
         draw.text((x, y), line, font=title_font, fill=scheme['text'])
-    
-    # サイト名の設定（赤いサイト用）
-    site_names = {
-        'selectadvance': 'Select Advance',
-        'welkenraedt': 'Welkenraedt Online',
-        'ykikaku': 'YK企画',
-        'efdlqjtz': 'EFDLQJTZ',
-        'ncepqvub': 'あと払いスマートライフ',
-        'kosagi': '金欠ブロガーの裏金策帖',
-        'selectad01': 'Select AD',
-        'thrones': 'Thrones'
-    }
-    
-    site_name = site_names.get(site_key, 'Financial Blog')
-    
-    try:
-        bbox = draw.textbbox((0, 0), site_name, font=subtitle_font)
-        text_width = bbox[2] - bbox[0]
-    except AttributeError:
-        text_width, _ = draw.textsize(site_name, font=subtitle_font)
-    
-    x = (width - text_width) // 2
-    draw.text((x, height - 50), site_name, font=subtitle_font, fill=scheme['text'])
     
     # 上部ライン
     draw.rectangle([50, 40, width-50, 42], fill=scheme['text'])
@@ -1616,4 +1590,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
