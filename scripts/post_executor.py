@@ -566,7 +566,7 @@ def check_and_execute_k_column_schedules(window_minutes: int = 30) -> Dict[str, 
     executed_total = 0
     skipped_total = 0
     
-    for project_key, config in NON_WP_PROJECTS.items():
+    for project_key, config in target_projects.items():  # ← NON_WP_PROJECTSではなくtarget_projects
         try:
             logger.info(f"📋 {project_key} ({config['worksheet']}) チェック中...")
             sheet = client.open_by_key(SPREADSHEET_ID).worksheet(config['worksheet'])
@@ -632,6 +632,8 @@ def main():
     parser = argparse.ArgumentParser(description='K列予約投稿実行スクリプト（GitHub Actions用）')
     parser.add_argument('--window', type=int, default=30, help='実行ウィンドウ（分）')
     parser.add_argument('--test', action='store_true', help='テストモード')
+    parser.add_argument('--project', type=str, help='特定プロジェクトのみ実行（biggift/arigataya）')  # ← この行を追加
+
     
     args = parser.parse_args()
     
@@ -668,3 +670,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
