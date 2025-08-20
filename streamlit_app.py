@@ -275,6 +275,35 @@ def choose_other_link():
     return None, None
 
 # ========================
+# ターゲット正規化
+# ========================
+def normalize_target(value: str) -> str:
+    """投稿先の入力ゆらぎを正規化（UI/シート両対応）"""
+    if not value:
+        return ""
+    s = str(value).strip().lower()
+    # 全角→半角
+    try:
+        import unicodedata
+        s = unicodedata.normalize("NFKC", s)
+    except Exception:
+        pass
+    # 代表表記に寄せる
+    aliases = {
+        'fc2': ['fc2', 'fc-2', 'ｆｃ２', 'fc２', 'ＦＣ２', 'fc2ブログ', 'fc2 blog'],
+        'seesaa': ['seesaa', 'シーサー', 'しーさー', 'seesaaブログ'],
+        'livedoor': ['livedoor', 'ライブドア', 'live door', 'livedoorブログ'],
+        'blogger': ['blogger', 'ブロガー', 'blogger.com'],
+        'both': ['both', '両方', 'どちらも', 'all'],
+    }
+    for key, words in aliases.items():
+        if s in words:
+            return key
+    return s  # 既に期待値ならそのまま
+
+
+
+# ========================
 # ユーティリティ
 # ========================
 def enforce_anchor_attrs(html: str) -> str:
@@ -875,7 +904,7 @@ def get_max_posts_for_project(project_key, post_target=""):
         else: return 20
     return mx
 
-def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
+def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True, ui_override_target:str=""):
     try:
         st.session_state.posting_projects.add(project_key)
         add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始")
@@ -961,53 +990,57 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 add_realtime_log(f"❌ {tgt} 投稿失敗")
 
                     else:
-                        # 非WP（biggift/arigataya）
-                        allowed = [p.lower() for p in platforms]  # この案件で許可される
-                        targets = []
+                        # ★ 非WordPress案件の分岐（biggift / arigataya など）
+                        # 1) UI最優先 → 2) シートの投稿先 → 3) フォールバック優先順位
+                        desired_target_raw = ui_override_target or (row_data.get('投稿先', '') or '')
+                        desired_target = normalize_target(desired_target_raw)
 
-                        if desired_target == 'both':
-                            targets = allowed[:]  # 案件の並び順で両方
-                        elif desired_target in allowed:
-                            targets = [desired_target]
-                        elif desired_target in ('seesaa','fc2','livedoor','blogger') and desired_target not in allowed:
-                            add_realtime_log(f"❌ 指定ターゲット '{desired_target}' はこの案件では使用不可 (allowed: {allowed})")
-                            st.error(f"指定ターゲット『{desired_target}』はこの案件では使用できません（許可: {', '.join(allowed)}）")
-                            break
-                        else:
-                            # 未指定・判別不能は中止して明示（誤投下防止）
-                            add_realtime_log("❌ 投稿先が未指定または判別できません。UIの『投稿先を上書き』で選択してください。")
-                            st.error("投稿先が未指定または判別できません。『投稿先を上書き』で（seesaa / fc2 / blogger / livedoor）を選択してください。")
-                            break
+                        add_realtime_log(f"🎯 希望ターゲット(前処理) = '{desired_target_raw}' → 正規化 = '{desired_target}'")
 
-                        add_realtime_log(f"🎯 実際に投稿するターゲット: {targets}")
+                        valid_targets = [p for p in ['livedoor', 'blogger', 'seesaa', 'fc2'] if p in platforms]
 
-                        def do_post(tname: str):
+                        def do_post(target_name: str):
                             nonlocal posted_urls
-                            if tname == 'livedoor':
-                                add_realtime_log("📤 livedoorに投稿中...")
-                                u = post_to_livedoor(article, category)
-                                posted_urls.append(u) if u else None
-                                add_realtime_log(f"{'✅ 成功 → ' + u if u else '❌ 失敗'}")
-                            elif tname == 'seesaa':
-                                add_realtime_log("📤 Seesaaに投稿中...")
-                                u = post_to_seesaa(article, category)
-                                posted_urls.append(u) if u else None
-                                add_realtime_log(f"{'✅ 成功 → ' + u if u else '❌ 失敗'}")
-                            elif tname == 'fc2':
-                                add_realtime_log("📤 FC2に投稿中...")
-                                u = post_to_fc2(article, category)
-                                posted_urls.append(u) if u else None
-                                add_realtime_log(f"{'✅ 成功 → ' + u if u else '❌ 失敗'}")
-                            elif tname == 'blogger':
-                                add_realtime_log("📤 Bloggerに投稿中...")
-                                u = post_to_blogger(article)
-                                posted_urls.append(u) if u else None
-                                add_realtime_log(f"{'✅ 成功 → ' + u if u else '⚠️ 未実装'}")
+                            t = normalize_target(target_name)
+                            if t == 'livedoor':
+                                add_realtime_log("📤 livedoor へ投稿開始")
+                                add_realtime_log(f"    endpoint: https://livedoor.blogcms.jp/atompub/{PLATFORM_CONFIGS['livedoor']['blog_name']}/article")
+                                post_url = post_to_livedoor(article, category)
+                            elif t == 'seesaa':
+                                add_realtime_log("📤 seesaa へ投稿開始")
+                                add_realtime_log(f"    endpoint: {PLATFORM_CONFIGS['seesaa']['endpoint']}")
+                                post_url = post_to_seesaa(article, category)
+                            elif t == 'fc2':
+                                add_realtime_log("📤 fc2 へ投稿開始")
+                                add_realtime_log(f"    endpoint: {PLATFORM_CONFIGS['fc2']['endpoint']}")
+                                post_url = post_to_fc2(article, category)
+                            elif t == 'blogger':
+                                add_realtime_log("📤 blogger へ投稿開始")
+                                post_url = post_to_blogger(article)
                             else:
-                                add_realtime_log(f"❌ 不明な投稿先: {tname}")
+                                add_realtime_log(f"❌ 未知のターゲット指定: {target_name}")
+                                return
+                            if post_url:
+                                posted_urls.append(post_url)
+                                add_realtime_log(f"✅ {t} 投稿成功 → {post_url}")
+                            else:
+                                add_realtime_log(f"❌ {t} 投稿失敗")
+
+    # 実際に投下するターゲット配列を決定
+                        if desired_target == 'both':
+                            targets = [t for t in ['livedoor', 'blogger'] if t in valid_targets] or valid_targets[:]
+                        elif desired_target in valid_targets:
+                            targets = [desired_target]
+                        else:
+        # フォールバック：この順で最初の存在プラットフォームへ
+                            fallback_order = [t for t in ['livedoor', 'blogger', 'seesaa', 'fc2'] if t in valid_targets]
+                            targets = fallback_order[:1] if fallback_order else []
+
+                        add_realtime_log(f"🧭 実際に投稿するターゲット = {targets}")
 
                         for t in targets:
                             do_post(t)
+
 
                     if not posted_urls:
                         add_realtime_log("❌ 投稿に失敗しました"); st.error("投稿に失敗しました"); break
@@ -1098,6 +1131,27 @@ def main():
             st.warning("**予約方式**: K列記録 → GitHub Actions実行")
         else:
             st.success("**予約方式**: WordPress予約投稿機能")
+
+# === 非WPのみ: UIで投稿先を明示指定できるように ===
+    ui_override_target = ""
+    if 'wordpress' not in config['platforms']:
+        st.subheader("投稿先（非WordPress）")
+        nonwp_targets = [p for p in ['livedoor', 'blogger', 'seesaa', 'fc2'] if p in config['platforms']]
+        # 先頭に「自動（シート値を使用）」を入れる
+        opts_label = ['自動（シートの「投稿先」列を使用）'] + [t.upper() if t!='blogger' else 'Blogger' for t in nonwp_targets]
+        choice = st.radio(
+            "UIで投稿先を固定したい場合は選択してください",
+            options=opts_label,
+            horizontal=True,
+            help="ここで選ぶとシートの『投稿先』よりも優先されます"
+        )
+        if choice != '自動（シートの「投稿先」列を使用）':
+        # 表示ラベル→キー名へ逆変換
+            map_back = {('Blogger' if t=='blogger' else t.upper()): t for t in nonwp_targets}
+            ui_override_target = map_back.get(choice, "")
+
+
+    
 
     # WP接続テスト
     if not cfg['needs_k_column']:
@@ -1247,7 +1301,8 @@ def main():
                         row, project_key,
                         post_count=post_count,
                         schedule_times=schedule_times if enable_schedule else [],
-                        enable_eyecatch=enable_eyecatch
+                        enable_eyecatch=enable_eyecatch,
+                        ui_override_target=ui_override_target  # ★追加
                     )
                     if ok:
                         st.cache_data.clear()
@@ -1291,5 +1346,6 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
 
