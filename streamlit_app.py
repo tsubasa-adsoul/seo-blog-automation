@@ -204,6 +204,13 @@ st.markdown("""
 if 'gemini_key_index' not in st.session_state:
     st.session_state.gemini_key_index = 0
 
+# 投稿処理中フラグ
+if 'is_posting' not in st.session_state:
+    st.session_state.is_posting = False
+
+if 'current_project' not in st.session_state:
+    st.session_state.current_project = None
+
 # ========================
 # 認証 & シート取得
 # ========================
@@ -959,6 +966,9 @@ def get_max_posts_for_project(project_key, post_target=""):
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
     """投稿実行（プラットフォーム自動判定・複数記事対応）"""
     try:
+        # 投稿開始時にフラグを設定
+        st.session_state.is_posting = True
+        
         config = PROJECT_CONFIGS[project_key]
         schedule_times = schedule_times or []
         
@@ -1089,6 +1099,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 sheet.update_cell(row_idx, 9, completion_time)  # I列
                                 st.balloons()
                                 st.success(f"{max_posts}記事完了!")
+                                # 投稿完了時にフラグをリセット
+                                st.session_state.is_posting = False
                                 return True
                             else:
                                 st.success(f"カウンター更新: {current_counter}")
@@ -1105,12 +1117,18 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     
                 except Exception as e:
                     st.error(f"記事{i+1}の投稿エラー: {e}")
+                    # エラー時もフラグをリセット
+                    st.session_state.is_posting = False
                     break
         
+        # 投稿完了時にフラグをリセット
+        st.session_state.is_posting = False
         st.success(f"{posts_completed}記事の投稿が完了しました")
         return True
         
     except Exception as e:
+        # エラー時もフラグをリセット
+        st.session_state.is_posting = False
         st.error(f"投稿処理エラー: {e}")
         return False
 
@@ -1130,8 +1148,19 @@ def main():
     project_key = st.selectbox(
         "プロジェクト選択",
         options=list(PROJECT_CONFIGS.keys()),
-        format_func=lambda x: f"{PROJECT_CONFIGS[x]['worksheet']} ({', '.join(PROJECT_CONFIGS[x]['platforms'])})"
+        format_func=lambda x: f"{PROJECT_CONFIGS[x]['worksheet']} ({', '.join(PROJECT_CONFIGS[x]['platforms'])})",
+        disabled=st.session_state.is_posting,  # 投稿中は無効化
+        key="project_selector"
     )
+    
+    # 投稿中の警告表示
+    if st.session_state.is_posting:
+        st.warning("🚀 投稿処理中です。完了まで設定を変更しないでください。")
+    
+    # プロジェクト変更検知
+    if st.session_state.current_project != project_key and not st.session_state.is_posting:
+        st.session_state.current_project = project_key
+        st.cache_data.clear()  # プロジェクト変更時にキャッシュクリア
     
     config = PROJECT_CONFIGS[project_key]
     
