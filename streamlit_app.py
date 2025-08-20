@@ -1208,7 +1208,37 @@ def main():
         else:
             st.success("**予約方式**: WordPress予約投稿機能")
     
-    # データ読み込み
+    # ⭐ ここに追加 ⭐
+    # WordPress接続テスト（WordPressプロジェクトのみ）
+    if not config['needs_k_column']:  # WordPressプロジェクトの場合
+        with st.expander("🔧 WordPress接続テスト", expanded=False):
+            st.info("投稿前にWordPressサイトへの接続をテストできます")
+            
+            # 利用可能サイト一覧
+            available_sites = config.get('wp_sites', [])
+            
+            test_col1, test_col2 = st.columns(2)
+            
+            with test_col1:
+                selected_site = st.selectbox(
+                    "テスト対象サイト:",
+                    options=available_sites,
+                    help="接続テストを行うサイトを選択"
+                )
+            
+            with test_col2:
+                if st.button(f"🔍 {selected_site} 接続テスト", type="secondary"):
+                    test_wordpress_connection(selected_site)
+            
+            # 全サイト一括テスト
+            if len(available_sites) > 1:
+                if st.button("🔍 全サイト一括テスト", type="secondary"):
+                    for site in available_sites:
+                        st.write(f"## {site} のテスト結果")
+                        test_wordpress_connection(site)
+                        st.write("---")
+    
+    # データ読み込み（既存のコード続行）
     df = load_sheet_data(project_key)
     
     if df.empty:
@@ -1484,6 +1514,7 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
 
 
