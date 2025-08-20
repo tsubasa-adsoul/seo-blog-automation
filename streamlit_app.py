@@ -109,7 +109,7 @@ WP_CONFIGS = {
         'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
     },
     'ncepqvub': {
-        'url': 'https://www.ncepqvub.com/',
+        'url': 'https://ncepqvub.jp/',  # ← 修正
         'user': 'ncepqvub',
         'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
     },
@@ -1297,7 +1297,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         
         add_realtime_log(f"📊 現在のカウンター: {current_counter}", project_key)
         
-        post_target = row_data.get('投稿先', '').strip()
+        post_target = row_data.get('投稿先', '').strip()  # ← この部分で列番号の問題
         max_posts = get_max_posts_for_project(project_key, post_target)
         
         # 投稿先の確認ログ
@@ -1830,3 +1830,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
