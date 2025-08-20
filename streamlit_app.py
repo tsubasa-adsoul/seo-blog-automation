@@ -807,7 +807,7 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
 def post_to_blogger_local(article: dict, category_name: str = None) -> str:
     """ローカル用のBlogger投稿関数（外部モジュールを呼び出し）"""
     try:
-        from scripts.blogger_client import post_to_blogger
+        # Blogger Client は必要に応じて動的インポート
         add_realtime_log("📤 Blogger API 呼び出し中...")
         
         # ラベル（カテゴリ）を配列で準備
@@ -1050,7 +1050,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 post_url = post_to_fc2(article, category)
                             elif t == 'blogger':
                                 add_realtime_log("📤 blogger へ投稿開始")
-                                post_url = post_to_blogger(article)
+                                post_url = post_to_blogger_local(article, category)
                             else:
                                 add_realtime_log(f"❌ 未知のターゲット指定: {target_name}")
                                 return
