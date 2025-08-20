@@ -24,6 +24,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from requests.auth import HTTPBasicAuth
 from xml.sax.saxutils import escape as xml_escape
 import tempfile
+import argparse
 
 # ----------------------------
 # ログ設定
@@ -103,23 +104,23 @@ PLATFORM_CONFIGS = {
 def get_sheets_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     
-    if GOOGLE_APPLICATION_CREDENTIALS_JSON:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write(GOOGLE_APPLICATION_CREDENTIALS_JSON)
-            temp_path = f.name
-        
-        creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
-        client = gspread.authorize(creds)
-        
-        try:
-            os.unlink(temp_path)
-        except Exception:
-            pass
-        
-        return client
-    else:
-        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-        return gspread.authorize(creds)
+    if not GOOGLE_APPLICATION_CREDENTIALS_JSON:
+        logger.error("❌ GOOGLE_APPLICATION_CREDENTIALS_JSON環境変数が設定されていません")
+        raise RuntimeError("Google認証情報が設定されていません")
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        f.write(GOOGLE_APPLICATION_CREDENTIALS_JSON)
+        temp_path = f.name
+    
+    creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
+    client = gspread.authorize(creds)
+    
+    try:
+        os.unlink(temp_path)
+    except Exception:
+        pass
+    
+    return client
 
 # ----------------------------
 # 競合他社・その他リンク管理
@@ -628,9 +629,7 @@ def check_and_execute_k_column_schedules(window_minutes: int = 30) -> Dict[str, 
 # メイン実行
 # ----------------------------
 def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='K列予約投稿実行スクリプト')
+    parser = argparse.ArgumentParser(description='K列予約投稿実行スクリプト（GitHub Actions用）')
     parser.add_argument('--window', type=int, default=30, help='実行ウィンドウ（分）')
     parser.add_argument('--test', action='store_true', help='テストモード')
     
@@ -638,6 +637,19 @@ def main():
     
     if args.test:
         logger.info("🧪 テストモード - 実際の投稿は行いません")
+        # テスト用のデータチェックのみ
+        try:
+            client = get_sheets_client()
+            logger.info("✅ Google Sheets接続成功")
+            
+            competitor_domains = get_competitor_domains()
+            other_links = get_other_links()
+            logger.info(f"✅ データ取得成功: 競合{len(competitor_domains)}件、その他{len(other_links)}件")
+            
+            logger.info("🧪 テストモード完了")
+        except Exception as e:
+            logger.error(f"❌ テスト失敗: {e}")
+            exit(1)
         return
     
     logger.info(f"🚀 K列予約投稿チェック開始: ウィンドウ={args.window}分")
