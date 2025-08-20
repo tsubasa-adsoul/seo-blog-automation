@@ -439,15 +439,83 @@ def _get_gemini_key():
     st.session_state.gemini_key_index += 1
     return key
 
+# ==== PATCH: Gemini caller with retry & rotation ====
+import math
+def _sleep_with_log(sec: float):
+    try:
+        add_realtime_log(f"⏳ Gemini待機 {sec:.1f} 秒（レート制限/一時エラー）")
+    except Exception:
+        pass
+    time.sleep(max(0.0, sec))
+
 def call_gemini(prompt: str) -> str:
-    api_key = _get_gemini_key()
-    endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}'
-    payload = {"contents":[{"parts":[{"text": prompt}]}], "generationConfig":{"temperature":0.7}}
-    resp = requests.post(endpoint, json=payload, timeout=60)
-    if resp.status_code != 200:
-        raise Exception(f"Gemini API エラー: {resp.status_code} / {resp.text[:200]}")
-    result = resp.json()
-    return result['candidates'][0]['content']['parts'][0]['text']
+    """
+    レート制限(429)や一時エラー(5xx)時に指数バックオフ＋キー自動ローテーションで再試行する。
+    """
+    if not GEMINI_API_KEYS:
+        raise RuntimeError("Gemini APIキーが未設定です")
+
+    max_attempts = 6            # 最大リトライ回数
+    base_backoff = 2.0          # 初回待機秒
+    last_err = None
+
+    for attempt in range(1, max_attempts + 1):
+        api_key = GEMINI_API_KEYS[st.session_state.gemini_key_index % len(GEMINI_API_KEYS)]
+        # 次回のためにインデックスを進める（429時に別キーへ切替されやすくする）
+        st.session_state.gemini_key_index += 1
+
+        endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}'
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.7}
+        }
+
+        try:
+            resp = requests.post(endpoint, json=payload, timeout=60)
+            # 正常
+            if resp.status_code == 200:
+                j = resp.json()
+                return j['candidates'][0]['content']['parts'][0]['text']
+
+            # 429 / 5xx はリトライ対象
+            if resp.status_code in (429, 500, 502, 503, 504):
+                # Retry-After があれば尊重
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        wait = float(retry_after)
+                    except Exception:
+                        wait = base_backoff * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+                else:
+                    wait = base_backoff * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+
+                # 429はキーを回しながら待機（すでに上で回している）
+                try:
+                    add_realtime_log(f"⚠️ Gemini {resp.status_code}: リトライ {attempt}/{max_attempts}、待機 {wait:.1f}s")
+                except Exception:
+                    pass
+                _sleep_with_log(wait)
+                last_err = f"Gemini API エラー: {resp.status_code} / {resp.text[:200]}"
+                continue
+
+            # それ以外は即エラー
+            last_err = f"Gemini API エラー: {resp.status_code} / {resp.text[:200]}"
+            break
+
+        except requests.RequestException as e:
+            # ネットワーク一時障害もリトライ
+            wait = base_backoff * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+            try:
+                add_realtime_log(f"⚠️ Gemini通信エラー: {e} → リトライ {attempt}/{max_attempts}、待機 {wait:.1f}s")
+            except Exception:
+                pass
+            _sleep_with_log(wait)
+            last_err = str(e)
+            continue
+
+    # ここまで来たら失敗
+    raise Exception(last_err or "Gemini API 呼び出しに失敗しました")
+# ==== PATCH END ====
 
 def generate_article_with_link(theme: str, url: str, anchor_text: str) -> dict:
     auto_theme = False
@@ -1218,3 +1286,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
