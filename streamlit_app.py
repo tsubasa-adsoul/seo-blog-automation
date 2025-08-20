@@ -205,11 +205,18 @@ st.markdown("""
         border-radius: 8px;
         margin: 1rem 0;
     }
+    .completion-modal {
+        background: #f8f9fa;
+        border: 2px solid #28a745;
+        border-radius: 10px;
+        padding: 2rem;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ========================
-# セッションステート初期化
+# セッションステート初期化（プロジェクト別対応）
 # ========================
 if 'gemini_key_index' not in st.session_state:
     st.session_state.gemini_key_index = 0
@@ -221,10 +228,13 @@ if 'current_project' not in st.session_state:
     st.session_state.current_project = None
 
 if 'realtime_logs' not in st.session_state:
-    st.session_state.realtime_logs = []
+    st.session_state.realtime_logs = {}  # プロジェクト別辞書
 
 if 'all_posted_urls' not in st.session_state:
-    st.session_state.all_posted_urls = []
+    st.session_state.all_posted_urls = {}  # プロジェクト別辞書
+
+if 'completion_results' not in st.session_state:
+    st.session_state.completion_results = {}  # 完了結果保存
 
 # ========================
 # 認証 & シート取得
@@ -613,7 +623,7 @@ def post_to_blogger(article: dict) -> str:
 
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
                       schedule_dt: datetime = None, enable_eyecatch: bool = True) -> str:
-    """WordPressに投稿（予約投稿対応）"""
+    """WordPressに投稿（予約投稿対応・kosagi特別処理）"""
     if site_key not in WP_CONFIGS:
         st.error(f"不明なサイト: {site_key}")
         return ""
@@ -723,7 +733,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             st.info(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
         
         try:
-            # DNS解決の問題に対処するため、リトライ機能を追加
+            # リトライ機能付きでリクエスト
             import urllib3
             from urllib3.util.retry import Retry
             from requests.adapters import HTTPAdapter
@@ -759,13 +769,10 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 
         except Exception as e:
             st.error(f"WordPress投稿エラー ({site_key}): {e}")
-            # DNS解決エラーの場合、詳細情報を表示
-            if "Failed to resolve" in str(e):
-                st.info(f"💡 {site_key}への接続に問題があります。Streamlit Cloud環境のネットワーク問題の可能性があります。")
             return ""
 
 # ========================
-# ユーティリティ関数
+# ユーティリティ関数（プロジェクト別対応）
 # ========================
 def get_max_posts_for_project(project_key, post_target=""):
     """プロジェクトと投稿先に応じた最大投稿数を取得"""
@@ -782,17 +789,27 @@ def get_max_posts_for_project(project_key, post_target=""):
     else:
         return max_posts
 
-def add_realtime_log(message):
-    """リアルタイムログを追加"""
+def add_realtime_log(message, project_key):
+    """リアルタイムログを追加（プロジェクト別）"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     log_message = f"[{timestamp}] {message}"
-    st.session_state.realtime_logs.append(log_message)
-    if len(st.session_state.realtime_logs) > 50:
-        st.session_state.realtime_logs = st.session_state.realtime_logs[-30:]
+    
+    # プロジェクト別ログ管理
+    if project_key not in st.session_state.realtime_logs:
+        st.session_state.realtime_logs[project_key] = []
+    
+    st.session_state.realtime_logs[project_key].append(log_message)
+    
+    # ログが多すぎる場合は古いものを削除
+    if len(st.session_state.realtime_logs[project_key]) > 50:
+        st.session_state.realtime_logs[project_key] = st.session_state.realtime_logs[project_key][-30:]
 
-def add_posted_url(counter, title, url, timestamp):
-    """投稿URLを記録"""
-    st.session_state.all_posted_urls.append({
+def add_posted_url(counter, title, url, timestamp, project_key):
+    """投稿URLを記録（プロジェクト別）"""
+    if project_key not in st.session_state.all_posted_urls:
+        st.session_state.all_posted_urls[project_key] = []
+    
+    st.session_state.all_posted_urls[project_key].append({
         'counter': counter,
         'title': title,
         'url': url,
@@ -849,6 +866,7 @@ def load_sheet_data(project_key):
         return pd.DataFrame()
 
 def update_sheet_row(project_key, row_data, updates):
+    """スプレッドシート行更新（強化版）"""
     try:
         client = get_sheets_client()
         config = PROJECT_CONFIGS[project_key]
@@ -863,14 +881,17 @@ def update_sheet_row(project_key, row_data, updates):
                     if col_name in all_rows[0]:
                         col_idx = all_rows[0].index(col_name) + 1
                         sheet.update_cell(i, col_idx, value)
-                st.success(f"スプレッドシート更新完了: 行{i}")
+                        # 更新確認のため少し待機
+                        time.sleep(0.5)
+                
+                add_realtime_log(f"✅ スプレッドシート更新完了: 行{i}", project_key)
                 return True
         
-        st.error(f"対象行が見つかりませんでした")
+        add_realtime_log(f"❌ 対象行が見つかりませんでした", project_key)
         return False
         
     except Exception as e:
-        st.error(f"スプレッドシート更新エラー: {e}")
+        add_realtime_log(f"❌ スプレッドシート更新エラー: {e}", project_key)
         return False
 
 def add_schedule_to_k_column(project_key, row_data, schedule_times):
@@ -910,16 +931,20 @@ def add_schedule_to_k_column(project_key, row_data, schedule_times):
         return False
 
 # ========================
-# 投稿処理（全プラットフォーム対応）
+# 投稿処理（完全版・プロジェクト別ログ・スプシ更新修正）
 # ========================
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
-    """投稿実行（全プラットフォーム対応・完全ログ記録）"""
+    """投稿実行（完全版・プロジェクト別ログ・スプシ更新修正）"""
     try:
         st.session_state.posting_projects.add(project_key)
-        st.session_state.realtime_logs = []
-        st.session_state.all_posted_urls = []
         
-        add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始")
+        # プロジェクト別ログ初期化（リセットしない）
+        if project_key not in st.session_state.realtime_logs:
+            st.session_state.realtime_logs[project_key] = []
+        if project_key not in st.session_state.all_posted_urls:
+            st.session_state.all_posted_urls[project_key] = []
+        
+        add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始", project_key)
         
         config = PROJECT_CONFIGS[project_key]
         schedule_times = schedule_times or []
@@ -931,57 +956,57 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
             except:
                 current_counter = 0
         
-        add_realtime_log(f"📊 現在のカウンター: {current_counter}")
+        add_realtime_log(f"📊 現在のカウンター: {current_counter}", project_key)
         
         post_target = row_data.get('投稿先', '').strip()
         max_posts = get_max_posts_for_project(project_key, post_target)
         
         if current_counter >= max_posts:
-            add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み")
+            add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み", project_key)
             st.warning(f"既に{max_posts}記事完了しています")
             return False
         
         posts_completed = 0
-        add_realtime_log(f"🚀 {post_count}記事の投稿を開始")
+        add_realtime_log(f"🚀 {post_count}記事の投稿を開始", project_key)
         
         progress_bar = st.progress(0)
         
         for i in range(post_count):
             if current_counter >= max_posts:
-                add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了済み")
+                add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了済み", project_key)
                 st.warning(f"カウンター{current_counter}: 既に{max_posts}記事完了済み")
                 break
             
             schedule_dt = schedule_times[i] if i < len(schedule_times) else None
             
-            add_realtime_log(f"📝 記事{i+1}/{post_count}の処理開始")
+            add_realtime_log(f"📝 記事{i+1}/{post_count}の処理開始", project_key)
             
             with st.expander(f"記事{i+1}/{post_count}の投稿", expanded=True):
                 try:
                     # 記事内容の決定
                     if current_counter == max_posts - 1:
-                        add_realtime_log(f"🎯 {max_posts}記事目 → 宣伝URL使用")
+                        add_realtime_log(f"🎯 {max_posts}記事目 → 宣伝URL使用", project_key)
                         st.info(f"{max_posts}記事目 → 宣伝URL使用")
                         url = row_data.get('宣伝URL', '')
                         anchor = row_data.get('アンカーテキスト', project_key)
                         category = row_data.get('カテゴリー', 'お金のマメ知識')
                     else:
-                        add_realtime_log(f"🔗 {current_counter + 1}記事目 → その他リンク使用")
+                        add_realtime_log(f"🔗 {current_counter + 1}記事目 → その他リンク使用", project_key)
                         st.info(f"{current_counter + 1}記事目 → その他リンク使用")
                         url, anchor = get_other_link()
                         if not url:
-                            add_realtime_log("❌ その他リンクが取得できません")
+                            add_realtime_log("❌ その他リンクが取得できません", project_key)
                             st.error("その他リンクが取得できません")
                             break
                         category = 'お金のマメ知識'
                     
                     # 記事生成
-                    add_realtime_log("🧠 記事を生成中...")
+                    add_realtime_log("🧠 記事を生成中...", project_key)
                     with st.spinner("記事を生成中..."):
                         theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
                         article = generate_article_with_link(theme, url, anchor)
                     
-                    add_realtime_log(f"✅ 記事生成完了: {article['title'][:30]}...")
+                    add_realtime_log(f"✅ 記事生成完了: {article['title'][:30]}...", project_key)
                     st.success(f"タイトル: {article['title']}")
                     st.info(f"使用リンク: {anchor}")
                     
@@ -992,7 +1017,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     if 'wordpress' in platforms:
                         for site_key in config.get('wp_sites', []):
                             if not post_target or post_target in [site_key, '両方']:
-                                add_realtime_log(f"📤 {site_key}に投稿中...")
+                                add_realtime_log(f"📤 {site_key}に投稿中...", project_key)
                                 post_url = post_to_wordpress(
                                     article, 
                                     site_key, 
@@ -1002,54 +1027,54 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 )
                                 if post_url:
                                     posted_urls.append(post_url)
-                                    add_realtime_log(f"✅ {site_key}投稿成功: {post_url}")
+                                    add_realtime_log(f"✅ {site_key}投稿成功: {post_url}", project_key)
                     
                     elif 'seesaa' in platforms:
-                        add_realtime_log("📤 Seesaaに投稿中...")
+                        add_realtime_log("📤 Seesaaに投稿中...", project_key)
                         post_url = post_to_seesaa(article, category)
                         if post_url:
                             posted_urls.append(post_url)
-                            add_realtime_log(f"✅ Seesaa投稿成功: {post_url}")
+                            add_realtime_log(f"✅ Seesaa投稿成功: {post_url}", project_key)
                     
                     elif 'fc2' in platforms:
-                        add_realtime_log("📤 FC2に投稿中...")
+                        add_realtime_log("📤 FC2に投稿中...", project_key)
                         post_url = post_to_fc2(article, category)
                         if post_url:
                             posted_urls.append(post_url)
-                            add_realtime_log(f"✅ FC2投稿成功: {post_url}")
+                            add_realtime_log(f"✅ FC2投稿成功: {post_url}", project_key)
                     
                     elif 'livedoor' in platforms:
-                        add_realtime_log("📤 livedoorに投稿中...")
+                        add_realtime_log("📤 livedoorに投稿中...", project_key)
                         post_url = post_to_livedoor(article, category)
                         if post_url:
                             posted_urls.append(post_url)
-                            add_realtime_log(f"✅ livedoor投稿成功: {post_url}")
+                            add_realtime_log(f"✅ livedoor投稿成功: {post_url}", project_key)
                     
                     elif 'blogger' in platforms:
-                        add_realtime_log("📤 Bloggerに投稿中...")
+                        add_realtime_log("📤 Bloggerに投稿中...", project_key)
                         post_url = post_to_blogger(article)
                         if post_url:
                             posted_urls.append(post_url)
-                            add_realtime_log(f"✅ Blogger投稿成功: {post_url}")
+                            add_realtime_log(f"✅ Blogger投稿成功: {post_url}", project_key)
                     
                     if not posted_urls:
-                        add_realtime_log("❌ 投稿に失敗しました")
+                        add_realtime_log("❌ 投稿に失敗しました", project_key)
                         st.error("投稿に失敗しました")
                         break
                     
                     # 全投稿URLを記録
                     timestamp = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
                     for url_item in posted_urls:
-                        add_posted_url(current_counter + 1, article['title'], url_item, timestamp)
-                        add_realtime_log(f"📋 記事{current_counter + 1}記録: {article['title'][:30]}... → {url_item}")
+                        add_posted_url(current_counter + 1, article['title'], url_item, timestamp, project_key)
+                        add_realtime_log(f"📋 記事{current_counter + 1}記録: {article['title'][:30]}... → {url_item}", project_key)
                     
                     # カウンター更新
                     current_counter += 1
                     posts_completed += 1
                     
-                    add_realtime_log(f"📊 スプレッドシート更新中... (カウンター: {current_counter})")
+                    add_realtime_log(f"📊 スプレッドシート更新中... (カウンター: {current_counter})", project_key)
                     
-                    # スプレッドシート更新
+                    # スプレッドシート更新（強化版）
                     client = get_sheets_client()
                     config_sheet = PROJECT_CONFIGS[project_key]
                     sheet = client.open_by_key(SHEET_ID).worksheet(config_sheet['worksheet'])
@@ -1059,38 +1084,44 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     
                     for row_idx, row in enumerate(all_rows[1:], start=2):
                         if len(row) > 1 and row[1] == promo_url:
+                            # カウンター更新
                             sheet.update_cell(row_idx, 7, str(current_counter))
+                            time.sleep(0.5)  # 更新確認のため待機
                             
                             if current_counter >= max_posts:
-                                final_urls = [item['url'] for item in st.session_state.all_posted_urls if item['counter'] == max_posts]
+                                # 最終記事完了処理
+                                final_urls = [item['url'] for item in st.session_state.all_posted_urls[project_key] if item['counter'] == max_posts]
+                                
+                                # ステータス更新
                                 sheet.update_cell(row_idx, 5, "処理済み")
+                                time.sleep(0.5)
+                                
+                                # 投稿URL記録
                                 sheet.update_cell(row_idx, 6, ', '.join(final_urls))
+                                time.sleep(0.5)
+                                
+                                # 完了日時記録
                                 completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
                                 sheet.update_cell(row_idx, 9, completion_time)
+                                time.sleep(0.5)
                                 
-                                # 全投稿URLをログ出力
-                                add_realtime_log("🎯 全投稿記事一覧:")
-                                for item in st.session_state.all_posted_urls:
-                                    add_realtime_log(f"  📄 {item['counter']}記事目: {item['title'][:40]}...")
-                                    add_realtime_log(f"     🔗 {item['url']}")
-                                    add_realtime_log(f"     ⏰ {item['timestamp']}")
+                                add_realtime_log(f"🎉 {max_posts}記事完了！スプレッドシート更新完了", project_key)
                                 
-                                add_realtime_log(f"🎉 {max_posts}記事完了！")
+                                # 完了結果を保存（消えないように）
+                                st.session_state.completion_results[project_key] = {
+                                    'project_name': PROJECT_CONFIGS[project_key]['worksheet'],
+                                    'completed_at': completion_time,
+                                    'total_posts': max_posts,
+                                    'all_urls': st.session_state.all_posted_urls[project_key].copy()
+                                }
+                                
                                 st.balloons()
                                 st.success(f"{max_posts}記事完了!")
-                                
-                                # 完了時に全URLをStreamlitにも表示
-                                st.markdown("### 📋 投稿完了記事一覧")
-                                for item in st.session_state.all_posted_urls:
-                                    st.write(f"**{item['counter']}記事目**: {item['title']}")
-                                    st.write(f"🔗 [{item['url']}]({item['url']})")
-                                    st.write(f"⏰ {item['timestamp']}")
-                                    st.markdown("---")
                                 
                                 st.session_state.posting_projects.discard(project_key)
                                 return True
                             else:
-                                add_realtime_log(f"✅ カウンター更新: {current_counter}")
+                                add_realtime_log(f"✅ カウンター更新: {current_counter}", project_key)
                                 st.success(f"カウンター更新: {current_counter}")
                             break
                     
@@ -1098,29 +1129,29 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     
                     if current_counter < max_posts and i < post_count - 1:
                         wait_time = random.randint(MIN_INTERVAL, MAX_INTERVAL)
-                        add_realtime_log(f"⏳ 次の記事まで{wait_time}秒待機中...")
+                        add_realtime_log(f"⏳ 次の記事まで{wait_time}秒待機中...", project_key)
                         st.info(f"次の記事まで{wait_time}秒待機中...")
                         time.sleep(wait_time)
                     
                 except Exception as e:
-                    add_realtime_log(f"❌ 記事{i+1}の投稿エラー: {e}")
+                    add_realtime_log(f"❌ 記事{i+1}の投稿エラー: {e}", project_key)
                     st.error(f"記事{i+1}の投稿エラー: {e}")
                     st.session_state.posting_projects.discard(project_key)
                     break
         
         st.session_state.posting_projects.discard(project_key)
-        add_realtime_log(f"✅ {posts_completed}記事の投稿が完了しました")
+        add_realtime_log(f"✅ {posts_completed}記事の投稿が完了しました", project_key)
         st.success(f"{posts_completed}記事の投稿が完了しました")
         return True
         
     except Exception as e:
         st.session_state.posting_projects.discard(project_key)
-        add_realtime_log(f"❌ 投稿処理エラー: {e}")
+        add_realtime_log(f"❌ 投稿処理エラー: {e}", project_key)
         st.error(f"投稿処理エラー: {e}")
         return False
 
 # ========================
-# UI構築
+# UI構築（完全版・プロジェクト別表示）
 # ========================
 def main():
     # ヘッダー
@@ -1135,6 +1166,72 @@ def main():
     if not BLOGGER_AVAILABLE:
         st.warning("⚠️ Blogger投稿機能を使用するには、requirements.txtに追加ライブラリが必要です")
     
+    # 完了結果の表示（消えないように）
+    if st.session_state.completion_results:
+        st.markdown("## 🎉 投稿完了プロジェクト")
+        
+        for proj_key, result in st.session_state.completion_results.items():
+            with st.expander(f"✅ {result['project_name']} - 完了時刻: {result['completed_at']}", expanded=False):
+                st.markdown(f"**投稿完了**: {result['total_posts']}記事")
+                st.markdown("### 📋 投稿完了記事一覧")
+                
+                for item in result['all_urls']:
+                    st.write(f"**{item['counter']}記事目**: {item['title']}")
+                    st.write(f"🔗 [{item['url']}]({item['url']})")
+                    st.write(f"⏰ {item['timestamp']}")
+                    st.markdown("---")
+                
+                # OKボタンで結果を削除
+                if st.button(f"OK（{result['project_name']}の結果を閉じる）", key=f"close_{proj_key}"):
+                    del st.session_state.completion_results[proj_key]
+                    st.rerun()
+    
+    # 投稿中の全プロジェクトの進行状況を表示
+    posting_projects = st.session_state.get('posting_projects', set())
+    
+    if posting_projects:
+        st.markdown("## 🚀 投稿中プロジェクト")
+        
+        # タブで各プロジェクトの進行状況を表示
+        if len(posting_projects) > 1:
+            tabs = st.tabs([f"{PROJECT_CONFIGS[pk]['worksheet']}" for pk in posting_projects])
+            
+            for i, proj_key in enumerate(posting_projects):
+                with tabs[i]:
+                    if proj_key in st.session_state.get('realtime_logs', {}):
+                        st.markdown(f"### 📋 {PROJECT_CONFIGS[proj_key]['worksheet']} 進行状況")
+                        
+                        # 進捗率表示
+                        if proj_key in st.session_state.get('all_posted_urls', {}):
+                            posted_count = len(st.session_state.all_posted_urls[proj_key])
+                            max_posts = get_max_posts_for_project(proj_key)
+                            if max_posts > 0:
+                                progress = min(posted_count / max_posts, 1.0)
+                                st.progress(progress, f"{posted_count}/{max_posts} 記事完了")
+                        
+                        # 最新10件のログを表示
+                        logs = st.session_state.realtime_logs[proj_key][-10:]
+                        for log in logs:
+                            st.text(log)
+        else:
+            # 単一プロジェクトの場合
+            proj_key = list(posting_projects)[0]
+            st.warning(f"🚀 {PROJECT_CONFIGS[proj_key]['worksheet']} 投稿処理中です。")
+            
+            if proj_key in st.session_state.get('realtime_logs', {}):
+                # 進捗率表示
+                if proj_key in st.session_state.get('all_posted_urls', {}):
+                    posted_count = len(st.session_state.all_posted_urls[proj_key])
+                    max_posts = get_max_posts_for_project(proj_key)
+                    if max_posts > 0:
+                        progress = min(posted_count / max_posts, 1.0)
+                        st.progress(progress, f"{posted_count}/{max_posts} 記事完了")
+                
+                with st.expander("📋 リアルタイム進行状況", expanded=True):
+                    logs = st.session_state.realtime_logs[proj_key][-10:]
+                    for log in logs:
+                        st.text(log)
+    
     # プロジェクト選択
     project_key = st.selectbox(
         "プロジェクト選択",
@@ -1142,17 +1239,6 @@ def main():
         format_func=lambda x: f"{PROJECT_CONFIGS[x]['worksheet']} ({', '.join(PROJECT_CONFIGS[x]['platforms'])})",
         key="project_selector"
     )
-    
-    # 投稿中チェック
-    is_posting = project_key in st.session_state.get('posting_projects', set())
-    
-    if is_posting:
-        st.warning(f"🚀 {PROJECT_CONFIGS[project_key]['worksheet']} 投稿処理中です。完了まで設定を変更しないでください。")
-        
-        if st.session_state.get('realtime_logs'):
-            with st.expander("📋 リアルタイム進行状況", expanded=True):
-                for log in st.session_state.realtime_logs[-10:]:
-                    st.text(log)
     
     # プロジェクト変更検知
     if st.session_state.current_project != project_key and project_key not in st.session_state.get('posting_projects', set()):
@@ -1378,5 +1464,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
