@@ -807,20 +807,18 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
 def post_to_blogger_local(article: dict, category_name: str = None) -> str:
     """ローカル用のBlogger投稿関数（外部モジュールを呼び出し）"""
     try:
-        # Blogger Client は必要に応じて動的インポート
+        # ここでインポートが必要
+        from scripts.blogger_client import post_to_blogger
         add_realtime_log("📤 Blogger API 呼び出し中...")
         
-        # ラベル（カテゴリ）を配列で準備
         labels = [category_name] if category_name else ["金融"]
         
-        # 外部モジュールのpost_to_blogger関数を呼び出し
-        # 戻り値: (post_url, response_data)
         post_url, response = post_to_blogger(
             title=article["title"],
             html_body=article["content"],
             labels=labels,
-            blog_id=None,  # secrets からの blog_id を使用
-            schedule_dt=None  # 即時投稿
+            blog_id=None,
+            schedule_dt=None
         )
         
         if post_url:
@@ -1391,3 +1389,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
