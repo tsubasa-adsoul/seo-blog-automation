@@ -201,19 +201,49 @@ st.markdown("""
 # ========================
 # セッションステート初期化
 # ========================
-if 'gemini_key_index' not in st.session_state:
-    st.session_state.gemini_key_index = 0
+def init_session_state():
+    """セッションステートの初期化"""
+    if 'posting_projects' not in st.session_state:
+        st.session_state.posting_projects = set()
+    if 'realtime_logs' not in st.session_state:
+        st.session_state.realtime_logs = []
 
-# 投稿処理中フラグ（プロジェクト別）
-if 'posting_projects' not in st.session_state:
-    st.session_state.posting_projects = set()
+def add_realtime_log(message):
+    """リアルタイムログを追加"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    log_message = f"[{timestamp}] {message}"
+    st.session_state.realtime_logs.append(log_message)
+    # ログが多すぎる場合は古いものを削除
+    if len(st.session_state.realtime_logs) > 10:
+        st.session_state.realtime_logs.pop(0)
 
-if 'current_project' not in st.session_state:
-    st.session_state.current_project = None
-
-# リアルタイムログ用
-if 'realtime_logs' not in st.session_state:
-    st.session_state.realtime_logs = []
+# ========================
+# メイン関数
+# ========================
+def main():
+    # セッションステートの初期化
+    init_session_state()
+    
+    st.title("SEOブログ自動化ツール")
+    st.write("記事を自動生成して複数のプラットフォームに投稿します")
+    
+    # プロジェクト選択（全6プロジェクト対応）
+    project_options = {
+        'biggift': 'ビックギフト（非WordPress・K列予約）',
+        'arigataya': 'ありがた屋（非WordPress・K列予約）',
+        'kaitori_life': '買取LIFE（WordPress・予約投稿）',
+        'osaifu_rescue': 'お財布レスキュー（WordPress・予約投稿）',
+        'kure_kaeru': 'クレかえる（WordPress・予約投稿）',
+        'red_site': '赤いサイト（WordPress・kosagi特殊）'
+    }
+    
+    project_key = st.selectbox(
+        "プロジェクト選択:",
+        options=list(project_options.keys()),
+        format_func=lambda x: project_options[x],
+        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
+        key="project_selector"
+    )
 
 # ========================
 # 認証 & シート取得
@@ -1616,4 +1646,5 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
