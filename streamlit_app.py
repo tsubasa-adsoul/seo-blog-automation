@@ -79,14 +79,14 @@ PROJECT_CONFIGS = {
 # WordPress設定
 WP_CONFIGS = {
     'ykikaku': {
-        'url': 'https://ykikaku.xsrv.jp/',
+        'url': 'https://ykikaku.v2006.coreserver.jp/',
         'user': 'ykikaku',
-        'password': 'lfXp BJNx Rvy8 rBlt Yjug ADRn'
+        'password': 'QnV8 5VlW RwZN YV4P zAcl Gfce'
     },
     'efdlqjtz': {
-        'url': 'https://www.efdlqjtz.v2010.coreserver.jp/',
+        'url': 'https://www.efdlqjtz.com/',
         'user': 'efdlqjtz',
-        'password': 'KCIA cTyz TcdG U1Qs M4pd eezb'
+        'password': 'nJh6 Gqm6 qfPn T6Zu WQGV Aymx'
     },
     'selectadvance': {
         'url': 'https://selectadvance.v2006.coreserver.jp/',
@@ -99,24 +99,24 @@ WP_CONFIGS = {
         'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
     },
     'ncepqvub': {
-        'url': 'https://ncepqvub.v2009.coreserver.jp/',
+        'url': 'https://www.ncepqvub.com/',
         'user': 'ncepqvub',
-        'password': 'DIZy ky10 UAhO NJ47 6Jww ImdE'
+        'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
     },
     'kosagi': {
         'url': 'https://www.kosagi.jp/',
-        'user': 'kosagi',  # 後で設定
-        'password': 'K2DZ ERIy aTLb K2Z0 gHi6 XdIN'  # 後で設定
+        'user': 'kosagi',
+        'password': 'VsGS VU5J cKx8 HM6p oLEb VdNH'
     },
     'selectad': {
-        'url': 'https://selectad01.xsrv.jp/',
-        'user': 'selectad01',
-        'password': '8LhM laXm pDUx gkjV cg1f EXYr'
+        'url': 'https://selectad.v2006.coreserver.jp/',
+        'user': 'selectad',
+        'password': 'xVA8 6yxD TdkP CJE4 yoQN qAHn'
     },
     'thrones': {
         'url': 'https://thrones.v2009.coreserver.jp/',
         'user': 'thrones',
-        'password': 'ETvJ VP2F jugd mxXU xJX0 wHVr'
+        'password': 'Fz9k fB3y wJuN tL8m zPqX vR4s'
     }
 }
 
@@ -1200,23 +1200,27 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     platforms = config['platforms']
                     
                     if 'wordpress' in platforms:
-                        # WordPress投稿（予約投稿対応）
-                        for site_key in config.get('wp_sites', []):
-                            # 投稿先が指定されている場合は、その投稿先のみに投稿
-                            if post_target and post_target != '両方' and post_target != site_key:
-                                continue
-                            # 投稿先が未指定または「両方」の場合は全サイトに投稿
-                            add_realtime_log(f"📤 {site_key}に投稿中...")
-                            post_url = post_to_wordpress(
-                                article, 
-                                site_key, 
-                                category, 
-                                schedule_dt, 
-                                enable_eyecatch
-                            )
-                            if post_url:
-                                posted_urls.append(post_url)
-                                add_realtime_log(f"✅ {site_key}投稿成功")
+                        # WordPress投稿（選択されたサイトのみ）
+                        if not post_target:
+                            add_realtime_log("⚠️ 投稿先が未選択のため、投稿をスキップ")
+                        else:
+                            # 選択された投稿先のみに投稿
+                            if post_target in config.get('wp_sites', []):
+                                add_realtime_log(f"📤 {post_target}に投稿中...")
+                                post_url = post_to_wordpress(
+                                    article, 
+                                    post_target, 
+                                    category, 
+                                    schedule_dt, 
+                                    enable_eyecatch
+                                )
+                                if post_url:
+                                    posted_urls.append(post_url)
+                                    add_realtime_log(f"✅ {post_target}投稿成功")
+                                else:
+                                    add_realtime_log(f"❌ {post_target}投稿失敗")
+                            else:
+                                add_realtime_log(f"❌ 不正な投稿先: {post_target}")
                     
                     elif 'seesaa' in platforms:
                         # Seesaa投稿
@@ -1659,4 +1663,3 @@ jobs:
 
 if __name__ == "__main__":
     main()
-
