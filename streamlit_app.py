@@ -1289,20 +1289,24 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
 # UI構築
 # ========================
 def main():
-    # ヘッダー
-    st.markdown("""
-    <div class="main-header">
-        <h1>統合ブログ投稿管理システム</h1>
-        <p>全プラットフォーム対応 - WordPress予約投稿 / 非WordPress K列記録</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # セッションステートの初期化
+    init_session_state()
+    
+    st.title("SEOブログ自動化ツール")
+    st.write("記事を自動生成して複数のプラットフォームに投稿します")
     
     # プロジェクト選択
+    project_options = {
+        'biggift': 'ビックギフト（WordPress・予約投稿）',
+        'arigataya': 'ありがた屋（非WordPress・K列予約）', 
+        'redsite': '赤いサイト（WordPress・kosagi特殊）'
+    }
+    
     project_key = st.selectbox(
-        "プロジェクト選択",
-        options=list(PROJECT_CONFIGS.keys()),
-        format_func=lambda x: f"{PROJECT_CONFIGS[x]['worksheet']} ({', '.join(PROJECT_CONFIGS[x]['platforms'])})",
-        disabled=project_key in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
+        "プロジェクト選択:",
+        options=list(project_options.keys()),
+        format_func=lambda x: project_options[x],
+        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
         key="project_selector"
     )
     
@@ -1612,3 +1616,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
