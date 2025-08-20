@@ -1017,26 +1017,25 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     posted_urls = []
                     allowed = config['platforms']
 
-                    # WordPress群（プロジェクトがWP）の場合は site_key をC列に入れる運用を想定
-                    if 'wordpress' in allowed and (post_target in WP_CONFIGS or post_target in ('wordpress','')):
-                        # C列に特定site_keyが入っていればその1サイトのみ。空なら全サイト。
+                    # WordPress群（プロジェクトがWP）の場合
+                    if 'wordpress' in allowed:
                         wp_sites = config.get('wp_sites', [])
-                        if post_target in WP_CONFIGS:
-                            if post_target in wp_sites:
-                                add_realtime_log(f"📤 WordPress({post_target})のみに投稿", project_key)
-                                add_notification(f"指定WPサイト '{post_target}' に投稿します", "info", project_key)
-                                post_url = post_to_wordpress(article, post_target, category, schedule_dt, enable_eyecatch, project_key)
-                                if post_url:
-                                    posted_urls.append(post_url)
-                            else:
-                                add_notification(f"C列のWPサイト '{post_target}' はこのプロジェクトに未登録", "error", project_key)
+                        
+                        # C列が空白の場合はエラー
+                        if not post_target or post_target in ('wordpress', ''):
+                            add_notification("C列「投稿先」が空白です。投稿先サイトを指定してください", "error", project_key)
+                            break
+                        
+                        # C列に特定site_keyが入っている場合のみ投稿
+                        if post_target in WP_CONFIGS and post_target in wp_sites:
+                            add_realtime_log(f"📤 WordPress({post_target})のみに投稿", project_key)
+                            add_notification(f"指定WPサイト '{post_target}' に投稿します", "info", project_key)
+                            post_url = post_to_wordpress(article, post_target, category, schedule_dt, enable_eyecatch, project_key)
+                            if post_url:
+                                posted_urls.append(post_url)
                         else:
-                            # 空 or "wordpress" → 全サイト
-                            add_notification("投稿先が未指定のため、登録された全WPサイトに投稿します", "info", project_key)
-                            for site_key in wp_sites:
-                                post_url = post_to_wordpress(article, site_key, category, schedule_dt, enable_eyecatch, project_key)
-                                if post_url:
-                                    posted_urls.append(post_url)
+                            add_notification(f"C列のWPサイト '{post_target}' はこのプロジェクトに登録されていません", "error", project_key)
+                            break
 
                     # 非WPプロジェクト（Blogger / livedoor / Seesaa / FC2）
                     elif post_target in allowed:
@@ -1058,28 +1057,10 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             if post_url: posted_urls.append(post_url)
                         else:
                             add_notification(f"未対応の投稿先: {post_target}", "error", project_key)
-
+                            break
                     else:
-                        # C列が空のとき：プロジェクトの最初のプラットフォームに投げる（従来互換）
-                        default_target = allowed[0] if allowed else ''
-                        add_notification(f"投稿先が空のため既定 '{default_target}' を使用", "warning", project_key)
-                        if default_target == 'blogger':
-                            post_url = post_to_blogger(article, project_key)
-                        elif default_target == 'livedoor':
-                            post_url = post_to_livedoor(article, category, project_key)
-                        elif default_target == 'seesaa':
-                            post_url = post_to_seesaa(article, category, project_key)
-                        elif default_target == 'fc2':
-                            post_url = post_to_fc2(article, category, project_key)
-                        elif default_target == 'wordpress':
-                            for site_key in config.get('wp_sites', []):
-                                post_url = post_to_wordpress(article, site_key, category, schedule_dt, enable_eyecatch, project_key)
-                                if post_url: posted_urls.append(post_url)
-                            post_url = None
-                        else:
-                            post_url = None
-                        if post_url:
-                            posted_urls.append(post_url)
+                        add_notification(f"未対応または空白の投稿先: '{post_target_raw}'", "error", project_key)
+                        break
 
                     if not posted_urls:
                         add_realtime_log("❌ 投稿に失敗しました", project_key)
@@ -1385,5 +1366,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
