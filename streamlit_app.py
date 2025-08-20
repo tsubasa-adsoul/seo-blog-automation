@@ -1144,10 +1144,10 @@ def main():
         )
     with right:
         st.caption("進行状況ログ")
-        st.markdown('<div class="logbox" id="logbox">', unsafe_allow_html=True)
-        for log in st.session_state.realtime_logs[-500:]:
-            st.text(log)
-        st.markdown('</div>', unsafe_allow_html=True)
+        log_container = st.container()
+        with log_container:
+            for log in st.session_state.realtime_logs[-10:]:  # 最新10件のみ表示
+                st.text(log)
 
     # プロジェクト切り替え時はデータキャッシュクリア
     current_project = st.session_state.get('current_project')
