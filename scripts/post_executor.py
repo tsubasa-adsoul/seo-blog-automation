@@ -554,6 +554,9 @@ def check_and_execute_k_column_schedules(window_minutes: int = 30) -> Dict[str, 
     - 非WordPressプロジェクトのK列以降をチェック
     - 現在時刻〜+window_minutes内の予約を実行
     """
+    if target_projects is None:
+        target_projects = NON_WP_PROJECTS  # ← この行を追加
+    
     logger.info("⏰ K列予約投稿チェック開始")
     client = get_sheets_client()
     now = datetime.now()
@@ -670,4 +673,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
