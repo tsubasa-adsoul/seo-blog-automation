@@ -15,6 +15,8 @@ import tempfile
 import os
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
+import io
+from PIL import Image, ImageDraw, ImageFont
 
 # ========================
 # 設定値（Secretsから取得）
@@ -298,8 +300,220 @@ def get_other_link():
     return None, None
 
 # ========================
-# Gemini記事生成
+# アイキャッチ画像自動生成関数
 # ========================
+def create_eyecatch_image(title: str, site_key: str) -> bytes:
+    """タイトルからアイキャッチ画像を自動生成（サイト別対応）"""
+    
+    # 画像サイズ
+    width, height = 600, 400
+    
+    # サイト別カラーパレット
+    site_color_schemes = {
+        'selectadvance': [
+            {'bg': '#2E7D32', 'accent': '#66BB6A', 'text': '#FFFFFF'},  # 緑×薄緑
+            {'bg': '#388E3C', 'accent': '#81C784', 'text': '#FFFFFF'},  # 深緑×ライトグリーン
+        ],
+        'welkenraedt': [
+            {'bg': '#1976D2', 'accent': '#64B5F6', 'text': '#FFFFFF'},  # 青×薄青
+            {'bg': '#303F9F', 'accent': '#7986CB', 'text': '#FFFFFF'},  # 深青×ライトブルー
+        ],
+        'ykikaku': [
+            {'bg': '#E91E63', 'accent': '#F48FB1', 'text': '#FFFFFF'},  # ピンク×薄ピンク
+            {'bg': '#C2185B', 'accent': '#F8BBD9', 'text': '#FFFFFF'},  # 深ピンク×ライトピンク
+        ],
+        'default': [
+            {'bg': '#4CAF50', 'accent': '#8BC34A', 'text': '#FFFFFF'},  # デフォルトグリーン
+            {'bg': '#689F38', 'accent': '#AED581', 'text': '#FFFFFF'},  # オリーブグリーン
+        ]
+    }
+    
+    schemes = site_color_schemes.get(site_key, site_color_schemes['default'])
+    scheme = random.choice(schemes)
+    
+    # 画像作成
+    img = Image.new('RGB', (width, height), color=scheme['bg'])
+    draw = ImageDraw.Draw(img)
+    
+    # 背景にグラデーション効果
+    for i in range(height):
+        alpha = i / height
+        r = int(int(scheme['bg'][1:3], 16) * (1 - alpha * 0.3))
+        g = int(int(scheme['bg'][3:5], 16) * (1 - alpha * 0.3))
+        b = int(int(scheme['bg'][5:7], 16) * (1 - alpha * 0.3))
+        draw.rectangle([(0, i), (width, i + 1)], fill=(r, g, b))
+    
+    # 装飾的な図形を追加
+    draw.ellipse([-50, -50, 150, 150], fill=scheme['accent'])
+    draw.ellipse([width-100, height-100, width+50, height+50], fill=scheme['accent'])
+    
+    # フォント設定（フォールバック対応）
+    try:
+        title_font = ImageFont.truetype("arial.ttf", 28)
+        subtitle_font = ImageFont.truetype("arial.ttf", 20)
+    except:
+        title_font = ImageFont.load_default()
+        subtitle_font = ImageFont.load_default()
+    
+    # タイトルを描画（改行対応）
+    lines = []
+    if len(title) > 12:
+        for sep in ['！', '？', '…', '!', '?']:
+            if sep in title:
+                idx = title.find(sep)
+                if idx > 0:
+                    lines = [title[:idx+1], title[idx+1:].strip()]
+                    break
+        
+        if not lines:
+            for sep in ['と', '、', 'の', 'は', 'が', 'を', 'に', '…', 'で']:
+                if sep in title:
+                    idx = title.find(sep)
+                    if 5 < idx < len(title) - 5:
+                        lines = [title[:idx], title[idx:]]
+                        break
+        
+        if not lines:
+            mid = len(title) // 2
+            lines = [title[:mid], title[mid:]]
+    else:
+        lines = [title]
+    
+    # 中央にタイトルを配置
+    y_start = (height - len(lines) * 50) // 2
+    
+    for i, line in enumerate(lines):
+        try:
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            text_width = bbox[2] - bbox[0]
+        except AttributeError:
+            text_width, _ = draw.textsize(line, font=title_font)
+        
+        x = (width - text_width) // 2
+        y = y_start + i * 50
+        
+        # 影
+        draw.text((x + 2, y + 2), line, font=title_font, fill=(0, 0, 0))
+        # 本体
+        draw.text((x, y), line, font=title_font, fill=scheme['text'])
+    
+    # サイト名の設定
+    site_names = {
+        'selectadvance': '後払いアプリ現金化攻略ブログ',
+        'welkenraedt': 'マネーハック365',
+        'ykikaku': 'お財布レスキュー',
+        'efdlqjtz': 'キャッシュアドバイザー',
+        'ncepqvub': 'マネーサポート',
+        'kosagi': 'ファイナンシャルガイド',
+        'selectad': '買取LIFEサポート',
+        'thrones': 'アセットマネジメント'
+    }
+    
+    site_name = site_names.get(site_key, 'Financial Blog')
+    
+    try:
+        bbox = draw.textbbox((0, 0), site_name, font=subtitle_font)
+        text_width = bbox[2] - bbox[0]
+    except AttributeError:
+        text_width, _ = draw.textsize(site_name, font=subtitle_font)
+    
+    x = (width - text_width) // 2
+    draw.text((x, height - 50), site_name, font=subtitle_font, fill=scheme['text'])
+    
+    # 上部ライン
+    draw.rectangle([50, 40, width-50, 42], fill=scheme['text'])
+    
+    # バイトデータとして返す
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='JPEG', quality=90)
+    img_byte_arr.seek(0)
+    
+    return img_byte_arr.getvalue()
+
+def upload_image_to_wordpress(image_data: bytes, filename: str, site_config: dict) -> int:
+    """画像をWordPressにアップロードしてIDを返す"""
+    
+    media_endpoint = f'{site_config["url"]}wp-json/wp/v2/media'
+    
+    # ファイル名から日本語を除去
+    import string
+    safe_filename = ''.join(c for c in filename if c in string.ascii_letters + string.digits + '-_.')
+    
+    if not safe_filename or safe_filename == '.jpg':
+        safe_filename = f"eyecatch_{int(time.time())}.jpg"
+    
+    if not safe_filename.endswith('.jpg'):
+        safe_filename += '.jpg'
+    
+    headers = {
+        'Content-Disposition': f'attachment; filename="{safe_filename}"',
+        'Content-Type': 'image/jpeg'
+    }
+    
+    try:
+        response = requests.post(
+            media_endpoint,
+            data=image_data,
+            headers=headers,
+            auth=HTTPBasicAuth(site_config['user'], site_config['password'])
+        )
+        
+        if response.status_code == 201:
+            media_id = response.json()['id']
+            return media_id
+        else:
+            return None
+            
+    except Exception as e:
+        return None
+
+def generate_slug_from_title(title):
+    """タイトルから英数字のスラッグを生成"""
+    keyword_map = {
+        '投資': 'investment',
+        '資産': 'asset',
+        '運用': 'management',
+        '増やす': 'increase',
+        '貯金': 'savings',
+        '節約': 'saving',
+        'クレジット': 'credit',
+        'カード': 'card',
+        'ローン': 'loan',
+        '金融': 'finance',
+        '銀行': 'bank',
+        '保険': 'insurance',
+        '実践': 'practice',
+        '方法': 'method',
+        '戦略': 'strategy',
+        'ガイド': 'guide',
+        '初心者': 'beginner',
+        '完全': 'complete',
+        '効果': 'effect',
+        '成功': 'success',
+        '選び方': 'selection',
+        '比較': 'comparison',
+        '活用': 'utilization',
+        'おすすめ': 'recommend',
+        '基礎': 'basic',
+        '知識': 'knowledge'
+    }
+    
+    slug_parts = ['money']
+    
+    for jp_word, en_word in keyword_map.items():
+        if jp_word in title:
+            slug_parts.append(en_word)
+            break
+    
+    if len(slug_parts) == 1:
+        slug_parts.append('tips')
+    
+    date_str = datetime.now().strftime('%m%d')
+    random_num = random.randint(100, 999)
+    
+    slug = '-'.join(slug_parts) + f'-{date_str}-{random_num}'
+    
+    return slug.lower()
 def _get_gemini_key():
     key = GEMINI_API_KEYS[st.session_state.gemini_key_index % len(GEMINI_API_KEYS)]
     st.session_state.gemini_key_index += 1
@@ -389,26 +603,50 @@ URL: {url}
 # ========================
 # 各プラットフォーム投稿関数
 # ========================
-def post_to_wordpress(article_data: dict, site_key: str, schedule_dt: datetime = None) -> str:
-    """WordPressに投稿（即時 or 予約）"""
+def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
+                      schedule_dt: datetime = None, create_eyecatch: bool = True) -> str:
+    """WordPressに投稿（アイキャッチ画像・予約投稿対応）"""
     if site_key not in WP_CONFIGS:
         st.error(f"不明なサイト: {site_key}")
         return ""
     
     site_config = WP_CONFIGS[site_key]
+    
+    # アイキャッチ画像を生成・アップロード
+    featured_media_id = None
+    if create_eyecatch:
+        try:
+            with st.spinner("アイキャッチ画像を生成中..."):
+                image_data = create_eyecatch_image(article_data['title'], site_key)
+                image_filename = f"{generate_slug_from_title(article_data['title'])}.jpg"
+                featured_media_id = upload_image_to_wordpress(image_data, image_filename, site_config)
+                
+                if featured_media_id:
+                    st.success("アイキャッチ画像設定完了")
+                else:
+                    st.warning("アイキャッチ画像の設定をスキップして記事投稿を続行")
+                    
+        except Exception as e:
+            st.warning(f"アイキャッチ画像生成エラー: {e}")
+    
     endpoint = f"{site_config['url']}wp-json/wp/v2/posts"
     
+    # カテゴリーIDを取得
+    category_id = get_category_id(site_config, category_name) if category_name else None
+    
     # スラッグ生成
-    slug_parts = ['money']
-    date_str = datetime.now().strftime('%m%d')
-    random_num = random.randint(100, 999)
-    slug = '-'.join(slug_parts) + f'-{date_str}-{random_num}'
+    slug = generate_slug_from_title(article_data['title'])
     
     post_data = {
         'title': article_data['title'],
         'content': article_data['content'],
-        'slug': slug.lower()
+        'slug': slug,
+        'categories': [category_id] if category_id else []
     }
+    
+    # アイキャッチ画像を設定
+    if featured_media_id:
+        post_data['featured_media'] = featured_media_id
     
     # 予約投稿の設定（WordPressの機能を使用）
     if schedule_dt and schedule_dt > datetime.now():
@@ -441,6 +679,24 @@ def post_to_wordpress(article_data: dict, site_key: str, schedule_dt: datetime =
     except Exception as e:
         st.error(f"WordPress投稿エラー ({site_key}): {e}")
         return ""
+
+def get_category_id(site_config, category_name):
+    """カテゴリー名からIDを取得"""
+    if not category_name:
+        return None
+    
+    try:
+        endpoint = f"{site_config['url']}wp-json/wp/v2/categories"
+        response = requests.get(endpoint)
+        
+        if response.status_code == 200:
+            categories = response.json()
+            for cat in categories:
+                if cat['name'] == category_name:
+                    return cat['id']
+        return None
+    except:
+        return None
 
 def post_to_seesaa(article: dict, category_name: str = None) -> str:
     """Seesaa投稿"""
@@ -700,10 +956,11 @@ def get_max_posts_for_project(project_key, post_target=""):
     else:
         return max_posts
 
-def execute_post(row_data, project_key, schedule_dt=None):
-    """投稿実行（プラットフォーム自動判定）"""
+def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
+    """投稿実行（プラットフォーム自動判定・複数記事対応）"""
     try:
         config = PROJECT_CONFIGS[project_key]
+        schedule_times = schedule_times or []
         
         # 現在のカウンター取得
         current_counter = 0
@@ -721,93 +978,132 @@ def execute_post(row_data, project_key, schedule_dt=None):
             st.warning(f"既に{max_posts}記事完了しています")
             return False
         
-        # 記事内容の決定
-        if current_counter == max_posts - 1:
-            # 最終記事：宣伝URL
-            st.info(f"{max_posts}記事目 → 宣伝URL使用")
-            url = row_data.get('宣伝URL', '')
-            anchor = row_data.get('アンカーテキスト', project_key)
-        else:
-            # 1-N記事目：その他リンク
-            st.info(f"{current_counter + 1}記事目 → その他リンク使用")
-            url, anchor = get_other_link()
-            if not url:
-                st.error("その他リンクが取得できません")
-                return False
+        posts_completed = 0
         
-        # 記事生成
-        with st.spinner("記事を生成中..."):
-            theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
-            article = generate_article_with_link(theme, url, anchor)
+        # プログレスバー
+        progress_bar = st.progress(0)
         
-        st.success(f"タイトル: {article['title']}")
-        st.info(f"使用リンク: {anchor}")
-        
-        # プラットフォーム別投稿
-        posted_urls = []
-        platforms = config['platforms']
-        
-        with st.spinner("投稿中..."):
-            if 'wordpress' in platforms:
-                # WordPress投稿（予約投稿対応）
-                for site_key in config.get('wp_sites', []):
-                    if not post_target or post_target in [site_key, '両方']:
-                        post_url = post_to_wordpress(article, site_key, schedule_dt)
+        for i in range(post_count):
+            if current_counter >= max_posts:
+                st.warning(f"カウンター{current_counter}: 既に{max_posts}記事完了済み")
+                break
+            
+            # i番目の予約時刻を取得
+            schedule_dt = schedule_times[i] if i < len(schedule_times) else None
+            
+            with st.expander(f"記事{i+1}/{post_count}の投稿", expanded=True):
+                try:
+                    # 記事内容の決定
+                    if current_counter == max_posts - 1:
+                        # 最終記事：宣伝URL
+                        st.info(f"{max_posts}記事目 → 宣伝URL使用")
+                        url = row_data.get('宣伝URL', '')
+                        anchor = row_data.get('アンカーテキスト', project_key)
+                        category = row_data.get('カテゴリー', 'お金のマメ知識') if current_counter == max_posts - 1 else 'お金のマメ知識'
+                    else:
+                        # 1-N記事目：その他リンク
+                        st.info(f"{current_counter + 1}記事目 → その他リンク使用")
+                        url, anchor = get_other_link()
+                        if not url:
+                            st.error("その他リンクが取得できません")
+                            break
+                        category = 'お金のマメ知識'
+                    
+                    # 記事生成
+                    with st.spinner("記事を生成中..."):
+                        theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
+                        article = generate_article_with_link(theme, url, anchor)
+                    
+                    st.success(f"タイトル: {article['title']}")
+                    st.info(f"使用リンク: {anchor}")
+                    
+                    # プラットフォーム別投稿
+                    posted_urls = []
+                    platforms = config['platforms']
+                    
+                    if 'wordpress' in platforms:
+                        # WordPress投稿（予約投稿対応）
+                        for site_key in config.get('wp_sites', []):
+                            if not post_target or post_target in [site_key, '両方']:
+                                post_url = post_to_wordpress(
+                                    article, 
+                                    site_key, 
+                                    category, 
+                                    schedule_dt, 
+                                    enable_eyecatch
+                                )
+                                if post_url:
+                                    posted_urls.append(post_url)
+                    
+                    elif 'seesaa' in platforms:
+                        # Seesaa投稿
+                        post_url = post_to_seesaa(article, category)
                         if post_url:
                             posted_urls.append(post_url)
-            
-            elif 'seesaa' in platforms:
-                # Seesaa投稿
-                category = row_data.get('カテゴリー', 'お金のマメ知識') if current_counter == max_posts - 1 else 'お金のマメ知識'
-                post_url = post_to_seesaa(article, category)
-                if post_url:
-                    posted_urls.append(post_url)
-            
-            elif 'fc2' in platforms:
-                # FC2投稿
-                category = row_data.get('カテゴリー', None) if current_counter == max_posts - 1 else None
-                post_url = post_to_fc2(article, category)
-                if post_url:
-                    posted_urls.append(post_url)
-            
-            elif 'livedoor' in platforms:
-                # livedoor投稿
-                category = row_data.get('カテゴリー', None) if current_counter == max_posts - 1 else None
-                post_url = post_to_livedoor(article, category)
-                if post_url:
-                    posted_urls.append(post_url)
-            
-            elif 'blogger' in platforms:
-                # Blogger投稿
-                post_url = post_to_blogger(article)
-                if post_url:
-                    posted_urls.append(post_url)
+                    
+                    elif 'fc2' in platforms:
+                        # FC2投稿
+                        post_url = post_to_fc2(article, category)
+                        if post_url:
+                            posted_urls.append(post_url)
+                    
+                    elif 'livedoor' in platforms:
+                        # livedoor投稿
+                        post_url = post_to_livedoor(article, category)
+                        if post_url:
+                            posted_urls.append(post_url)
+                    
+                    elif 'blogger' in platforms:
+                        # Blogger投稿
+                        post_url = post_to_blogger(article)
+                        if post_url:
+                            posted_urls.append(post_url)
+                    
+                    if not posted_urls:
+                        st.error("投稿に失敗しました")
+                        break
+                    
+                    # カウンター更新
+                    current_counter += 1
+                    posts_completed += 1
+                    
+                    # プログレスバー更新
+                    progress_bar.progress(posts_completed / post_count)
+                    
+                    # 最終記事完了チェック
+                    if current_counter >= max_posts:
+                        st.balloons()
+                        st.success(f"{max_posts}記事完了!")
+                        break
+                    
+                    # 投稿間隔
+                    if i < post_count - 1:
+                        time.sleep(random.randint(MIN_INTERVAL, MAX_INTERVAL))
+                        
+                except Exception as e:
+                    st.error(f"記事{i+1}の投稿エラー: {e}")
+                    break
         
-        if not posted_urls:
+        if posts_completed > 0:
+            # スプレッドシート更新
+            new_counter = (current_counter if current_counter > 0 else posts_completed)
+            updates = {'カウンター': str(new_counter)}
+            
+            if new_counter >= max_posts:
+                # 最終記事完了
+                updates['ステータス'] = '処理済み'
+                updates['投稿URL'] = ', '.join(posted_urls)
+                completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+                # I列に日時記録
+                if len(row_data.columns) >= 9:
+                    updates[row_data.columns[8]] = completion_time  # I列
+            
+            update_sheet_row(project_key, row_data, updates)
+            st.success(f"{posts_completed}記事の投稿が完了しました")
+            return True
+        else:
             st.error("投稿に失敗しました")
             return False
-        
-        # スプレッドシート更新
-        new_counter = current_counter + 1
-        updates = {'カウンター': str(new_counter)}
-        
-        if new_counter >= max_posts:
-            # 最終記事完了
-            updates['ステータス'] = '処理済み'
-            updates['投稿URL'] = ', '.join(posted_urls)
-            completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
-            # I列に日時記録
-            if len(row_data.columns) >= 9:
-                updates[row_data.columns[8]] = completion_time  # I列
-            
-            st.balloons()
-            st.success(f"{max_posts}記事完了！")
-        else:
-            st.success(f"カウンター更新: {new_counter}")
-        
-        update_sheet_row(project_key, row_data, updates)
-        
-        return True
         
     except Exception as e:
         st.error(f"投稿処理エラー: {e}")
@@ -873,6 +1169,18 @@ def main():
     # 投稿設定
     st.header("投稿設定")
     
+    # 投稿数設定
+    col1, col2 = st.columns(2)
+    with col1:
+        post_count = st.selectbox(
+            "投稿数",
+            options=[1, 2, 3, 4, 5],
+            help="一度に投稿する記事数を選択"
+        )
+    
+    with col2:
+        enable_eyecatch = st.checkbox("アイキャッチ画像を自動生成", value=True)
+    
     # WordPress以外は予約設定
     if config['needs_k_column']:
         st.markdown("""
@@ -892,7 +1200,7 @@ def main():
             schedule_input = st.text_area(
                 "予約時刻（1行につき1件）",
                 placeholder="10:30\n12:15\n14:00",
-                help="HH:MM形式で入力。今日の未来時刻のみ有効。"
+                help="HH:MM形式で入力。今日の未来時刻のみ有効。投稿数分の時刻を入力してください。"
             )
             
             if schedule_input:
@@ -918,6 +1226,9 @@ def main():
                     st.success(f"予約時刻 {len(schedule_times)}件を設定")
                     for dt in schedule_times:
                         st.write(f"• {dt.strftime('%H:%M')}")
+                    
+                    if len(schedule_times) < post_count:
+                        st.warning(f"投稿数{post_count}に対して予約時刻が{len(schedule_times)}件しかありません")
     else:
         # WordPress予約投稿
         st.markdown("""
@@ -931,21 +1242,56 @@ def main():
         # 予約投稿オプション
         enable_schedule = st.checkbox("予約投稿を使用する")
         
-        schedule_dt = None
+        schedule_times = []
         if enable_schedule:
-            col_date, col_time = st.columns(2)
-            with col_date:
-                schedule_date = st.date_input("予約日")
-            with col_time:
-                schedule_time = st.time_input("予約時刻")
+            st.subheader("予約時刻設定")
+            schedule_input = st.text_area(
+                "予約時刻（1行につき1件）",
+                placeholder="2025-08-20 10:30\n2025-08-20 12:15\n2025-08-20 14:00",
+                help="YYYY-MM-DD HH:MM形式または HH:MM形式で入力。投稿数分の時刻を入力してください。"
+            )
             
-            schedule_dt = datetime.combine(schedule_date, schedule_time)
-            
-            if schedule_dt <= datetime.now():
-                st.warning("予約時刻は現在時刻より後にしてください")
-                schedule_dt = None
-            else:
-                st.success(f"予約設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
+            if schedule_input:
+                lines = [line.strip() for line in schedule_input.split('\n') if line.strip()]
+                now = datetime.now()
+                
+                for line in lines:
+                    try:
+                        # 複数の日時フォーマットに対応
+                        formats = ['%Y-%m-%d %H:%M', '%Y/%m/%d %H:%M', '%H:%M']
+                        dt = None
+                        
+                        for fmt in formats:
+                            try:
+                                if fmt == '%H:%M':
+                                    time_obj = datetime.strptime(line, fmt)
+                                    dt = now.replace(
+                                        hour=time_obj.hour, 
+                                        minute=time_obj.minute, 
+                                        second=0, 
+                                        microsecond=0
+                                    )
+                                else:
+                                    dt = datetime.strptime(line, fmt)
+                                break
+                            except ValueError:
+                                continue
+                        
+                        if dt and dt > now:
+                            schedule_times.append(dt)
+                        elif dt:
+                            st.error(f"過去の時刻は指定できません: {line}")
+                            
+                    except Exception:
+                        st.error(f"無効な時刻形式: {line}")
+                
+                if schedule_times:
+                    st.success(f"予約時刻 {len(schedule_times)}件を設定")
+                    for dt in schedule_times:
+                        st.write(f"• {dt.strftime('%Y/%m/%d %H:%M')}")
+                    
+                    if len(schedule_times) < post_count:
+                        st.warning(f"投稿数{post_count}に対して予約時刻が{len(schedule_times)}件しかありません")
     
     # 投稿ボタン
     col_a, col_b = st.columns(2)
@@ -982,11 +1328,22 @@ def main():
                 else:
                     # 投稿実行
                     if not config['needs_k_column']:
-                        # WordPress予約投稿
-                        success = execute_post(row.to_dict(), project_key, schedule_dt)
+                        # WordPress予約投稿（複数記事対応）
+                        success = execute_post(
+                            row.to_dict(), 
+                            project_key, 
+                            post_count=post_count, 
+                            schedule_times=schedule_times,
+                            enable_eyecatch=enable_eyecatch
+                        )
                     else:
-                        # 即時投稿
-                        success = execute_post(row.to_dict(), project_key)
+                        # 即時投稿（複数記事対応）
+                        success = execute_post(
+                            row.to_dict(), 
+                            project_key, 
+                            post_count=post_count,
+                            enable_eyecatch=enable_eyecatch
+                        )
                     
                     if success:
                         time.sleep(2)
