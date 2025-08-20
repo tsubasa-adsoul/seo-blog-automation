@@ -981,7 +981,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             post_url = post_to_wordpress(article, tgt, category, schedule_dt, enable_eyecatch)
                             if post_url:
                                 posted_urls.append(post_url)
-                                add_realtime_log(f"✅ {tgt} 投稿成功")
+                                add_realtime_log(f"✅ {tgt} 投稿成功: {post_url}")
+                                st.markdown(f"- **{tgt}**: [{post_url}]({post_url})")
                             else:
                                 add_realtime_log(f"❌ {tgt} 投稿失敗")
 
@@ -997,6 +998,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ livedoor投稿成功")
+                                    add_realtime_log(f"🔗 URL: {post_url}")
+                                    st.markdown(f"- **livedoor**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("❌ livedoor投稿失敗")
                             elif target_name == 'seesaa':
@@ -1005,6 +1008,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ Seesaa投稿成功")
+                                    add_realtime_log(f"🔗 URL: {post_url}")
+                                    st.markdown(f"- **Seesaa**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("❌ Seesaa投稿失敗")
                             elif target_name == 'fc2':
@@ -1013,6 +1018,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ FC2投稿成功")
+                                    add_realtime_log(f"🔗 URL: {post_url}")
+                                    st.markdown(f"- **livedoor**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("❌ FC2投稿失敗")
                             elif target_name == 'blogger':
@@ -1021,6 +1028,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ Blogger投稿成功")
+                                    add_realtime_log(f"🔗 URL: {post_url}")
+                                    st.markdown(f"- **livedoor**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("⚠️ Blogger投稿は未実装（認証が複雑なため）")
                             else:
@@ -1361,3 +1370,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
