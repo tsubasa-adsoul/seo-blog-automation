@@ -2,25 +2,34 @@ name: Auto Blog Post - K Column Scheduler
 
 on:
   schedule:
-    # 30分ごとにK列予約投稿をチェック
-    - cron: '0,30 * * * *'
+    # 15分ごとにK列予約投稿をチェック（より細かい制御）
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       window_minutes:
         description: '実行ウィンドウ（分）'
         required: false
-        default: '30'
+        default: '20'
         type: string
       test_mode:
         description: 'テストモード'
         required: false
         default: false
         type: boolean
+      project_filter:
+        description: '対象プロジェクト（空欄=全て）'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - 'biggift'
+          - 'arigataya'
 
 jobs:
   check_scheduled_posts:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     
     steps:
       - name: Checkout repository
@@ -42,15 +51,37 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests gspread oauth2client xmlrpc.client
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            # requirements.txtがない場合のフォールバック
+            pip install requests gspread oauth2client
+          fi
+      
+      - name: Validate environment variables
+        run: |
+          echo "環境変数チェック中..."
+          if [ -z "$GOOGLE_APPLICATION_CREDENTIALS_JSON" ]; then
+            echo "❌ GOOGLE_APPLICATION_CREDENTIALS_JSON が設定されていません"
+            exit 1
+          fi
+          if [ -z "$SPREADSHEET_ID" ]; then
+            echo "❌ SPREADSHEET_ID が設定されていません"
+            exit 1
+          fi
+          echo "✅ 必須環境変数チェック完了"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       
       - name: Run K column scheduled posts checker
+        id: executor
         env:
-          # Google Sheets認証（JSONを直接環境変数に）
+          # Google Sheets認証
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           
-          # Gemini API
+          # Gemini API（複数キー対応）
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
@@ -73,26 +104,73 @@ jobs:
           # Blogger設定
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           
-          # 投稿間隔設定
+          # 投稿間隔設定（スパム回避）
           POST_MIN_INTERVAL: '60'
           POST_MAX_INTERVAL: '120'
           
         run: |
-          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '30' }}"
+          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '20' }}"
           TEST_MODE="${{ github.event.inputs.test_mode || 'false' }}"
+          PROJECT_FILTER="${{ github.event.inputs.project_filter || '' }}"
+          
+          echo "🚀 実行開始: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "📊 設定:"
+          echo "  - ウィンドウ: ${WINDOW_MINUTES}分"
+          echo "  - テストモード: ${TEST_MODE}"
+          echo "  - プロジェクトフィルター: ${PROJECT_FILTER:-'全て'}"
+          
+          # 実行コマンド構築
+          CMD="python scripts/post_executor.py --window $WINDOW_MINUTES"
           
           if [ "$TEST_MODE" = "true" ]; then
-            echo "テストモードで実行中..."
-            python scripts/post_executor.py --window $WINDOW_MINUTES --test
+            CMD="$CMD --test"
+            echo "🧪 テストモードで実行中..."
           else
-            echo "K列予約投稿チェック実行中（ウィンドウ: ${WINDOW_MINUTES}分）..."
-            python scripts/post_executor.py --window $WINDOW_MINUTES
+            echo "⚡ 本番モードで実行中..."
           fi
+          
+          if [ -n "$PROJECT_FILTER" ]; then
+            CMD="$CMD --project $PROJECT_FILTER"
+          fi
+          
+          # 実行
+          eval $CMD
+          
+          # 結果を環境変数に設定（次のステップで使用）
+          echo "EXECUTION_TIME=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
       
-      - name: Output execution summary
+      - name: Create execution summary
         if: always()
         run: |
-          echo "## 実行結果" >> $GITHUB_STEP_SUMMARY
-          echo "- 実行時刻: $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "- 対象プロジェクト: ビックギフト（livedoor/blogger）、ありがた屋（seesaa/fc2）" >> $GITHUB_STEP_SUMMARY
-          echo "- 実行ウィンドウ: ${{ github.event.inputs.window_minutes || '30' }}分" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 K列予約投稿実行結果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 基本情報" >> $GITHUB_STEP_SUMMARY
+          echo "- **実行時刻**: ${EXECUTION_TIME:-$(date '+%Y-%m-%d %H:%M:%S')}" >> $GITHUB_STEP_SUMMARY
+          echo "- **実行ウィンドウ**: ${{ github.event.inputs.window_minutes || '20' }}分" >> $GITHUB_STEP_SUMMARY
+          echo "- **テストモード**: ${{ github.event.inputs.test_mode || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **対象プロジェクト**: ${{ github.event.inputs.project_filter || '全プロジェクト' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 対象プラットフォーム" >> $GITHUB_STEP_SUMMARY
+          echo "- **ビックギフト向け**: Blogger, livedoor" >> $GITHUB_STEP_SUMMARY
+          echo "- **ありがた屋向け**: Seesaa, FC2" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 実行ステータス" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **成功** - K列予約投稿チェック完了" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **失敗** - エラーが発生しました" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ K列予約投稿チェックでエラーが発生しました"
+          echo "詳細はActions実行ログを確認してください"
+          # Slackやメール通知を追加する場合はここに
+      
+      - name: Clean up temporary files
+        if: always()
+        run: |
+          # 一時ファイルのクリーンアップ
+          find /tmp -name "*.json" -mmin +60 -delete 2>/dev/null || true
+          echo "🧹 一時ファイルクリーンアップ完了"
