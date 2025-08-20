@@ -131,7 +131,7 @@ def generate_slug_from_title(title):
 # アイキャッチ自動生成（完全版）
 # ========================
 def create_eyecatch_image(title: str, site_key: str) -> bytes:
-    """タイトルからアイキャッチ画像を自動生成（サイト別対応）"""
+    """タイトルからアイキャッチ画像を自動生成（Cloud環境対応）"""
     
     # 画像サイズ
     width, height = 600, 400
@@ -176,16 +176,27 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     # 右下の円
     draw.ellipse([width-100, height-100, width+50, height+50], fill=scheme['accent'])
     
-    # フォント設定
+    # フォント設定（Cloud環境対応）
+    import matplotlib.font_manager as fm
+    
     try:
-        # メイリオボールド（太字）で統一
-        title_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 28)
+        # japanize-matplotlibで日本語フォントを使用
+        import japanize_matplotlib
+        # matplotlibの日本語フォントを取得
+        font_prop = fm.FontProperties()
+        font_path = fm.findfont(font_prop, fallback_to_default=True)
+        title_font = ImageFont.truetype(font_path, 28)
     except:
-        # フォールバック（通常のメイリオ）
         try:
-            title_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 28)
+            # Linux環境の一般的なフォント
+            title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
         except:
-            title_font = ImageFont.load_default()
+            try:
+                # ローカル環境のフォント（EXE版）
+                title_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 28)
+            except:
+                # 最終フォールバック
+                title_font = ImageFont.load_default()
     
     # タイトルを描画（改行対応）
     lines = []
@@ -1590,6 +1601,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
