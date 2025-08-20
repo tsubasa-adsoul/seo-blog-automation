@@ -1,347 +1,329 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-統合ブログ投稿管理システム - 完全予約投稿対応版
-PCシャットダウン対応・GitHub Actions連携
-"""
-
-# ========================
-# 基本インポート
-# ========================
-import os
-import re
-import io
-import json
-import time
-import base64
-import random
-import logging
-import tempfile
-import xmlrpc.client
-from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlparse
-from datetime import datetime, timedelta
-
-import pandas as pd
+import streamlit as st
 import requests
 import gspread
-import streamlit as st
-from PIL import Image, ImageDraw, ImageFont
+import time
+import random
+import xmlrpc.client
+from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 from requests.auth import HTTPBasicAuth
+import json
+import re
+import pandas as pd
+from urllib.parse import urlparse
+import tempfile
+import os
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape as xml_escape
 
 # ========================
-# ログ設定（Streamlit Cloud対応）
+# 設定値
 # ========================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
+SHEET_ID = '1sV0r6LavB4BgU7jGaa5C-GdyogUpWr_y42a-tNZXuFo'
 
-# ========================
-# ページ設定
-# ========================
-st.set_page_config(
-    page_title="📝 統合ブログ投稿管理システム",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ========================
-# セッション状態（確実に初期化）
-# ========================
-_defaults = {
-    'authenticated': False,
-    'username': None,
-    'is_admin': False,
-}
-for _k, _v in _defaults.items():
-    if _k not in st.session_state:
-        st.session_state[_k] = _v
-
-# ========================
-# 定数・設定
-# ========================
-# スプレッドシートID（st.secrets優先・環境変数フォールバック）
-SPREADSHEET_ID = None
-try:
-    SPREADSHEET_ID = st.secrets.google.spreadsheet_id
-except Exception:
-    SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID', '')
-
-# 投稿間隔（予約実行時の連投緩和用）
-MIN_INTERVAL = 60   # 60秒
-MAX_INTERVAL = 120  # 120秒
-
-# プロジェクト設定（UI表示用）
-PROJECTS = {
-    'ビックギフト': {
+# プロジェクト設定（完全版）
+PROJECT_CONFIGS = {
+    'biggift': {
         'worksheet': 'ビックギフト向け',
-        'icon': '🎁',
-        'color': '#ff8c00',
         'platforms': ['blogger', 'livedoor'],
-        'wp_sites': [],
-        'max_posts': {'blogger': 20, 'livedoor': 15}
+        'max_posts': {'blogger': 20, 'livedoor': 15},
+        'needs_k_column': True  # 予約時刻をK列に記録する必要がある
     },
-    'ありがた屋': {
+    'arigataya': {
         'worksheet': 'ありがた屋向け',
-        'icon': '☕',
-        'color': '#8b4513',
         'platforms': ['seesaa', 'fc2'],
-        'wp_sites': [],
-        'max_posts': 20
+        'max_posts': 20,
+        'needs_k_column': True  # 予約時刻をK列に記録する必要がある
     },
-    '買取LIFE': {
+    'kaitori_life': {
         'worksheet': '買取LIFE向け',
-        'icon': '💰',
-        'color': '#ffd700',
         'platforms': ['wordpress'],
         'wp_sites': ['selectad', 'thrones'],
-        'max_posts': 20
+        'max_posts': 20,
+        'needs_k_column': False  # WordPressの予約投稿機能を使用
     },
-    'お財布レスキュー': {
+    'osaifu_rescue': {
         'worksheet': 'お財布レスキュー向け',
-        'icon': '💖',
-        'color': '#ff6b9d',
         'platforms': ['wordpress'],
         'wp_sites': ['ykikaku', 'efdlqjtz'],
-        'max_posts': 20
+        'max_posts': 20,
+        'needs_k_column': False  # WordPressの予約投稿機能を使用
     },
-    'クレかえる': {
+    'kure_kaeru': {
         'worksheet': 'クレかえる向け',
-        'icon': '🐸',
-        'color': '#7ed321',
         'platforms': ['wordpress'],
         'wp_sites': ['selectadvance', 'welkenraedt'],
-        'max_posts': 20
+        'max_posts': 20,
+        'needs_k_column': False  # WordPressの予約投稿機能を使用
     },
-    '赤いサイト': {
+    'red_site': {
         'worksheet': '赤いサイト向け',
-        'icon': '🛒',
-        'color': '#ff4444',
         'platforms': ['wordpress'],
         'wp_sites': ['ncepqvub', 'kosagi'],
-        'max_posts': 20
+        'max_posts': 20,
+        'needs_k_column': False  # WordPressの予約投稿機能を使用
     }
 }
 
-# WordPress接続情報（st.secrets優先・環境変数フォールバック）
-def _get_secret(path: List[str], env_name: Optional[str] = None) -> Optional[str]:
-    """st.secretsのネストを安全に取り出し。なければ環境変数へフォールバック"""
-    try:
-        cur = st.secrets
-        for k in path:
-            cur = cur[k]
-        if cur:
-            return str(cur)
-    except Exception:
-        pass
-    if env_name:
-        return os.environ.get(env_name)
-    return None
-
+# WordPress設定
 WP_CONFIGS = {
     'ykikaku': {
-        'url': _get_secret(['wp_ykikaku', 'url'], 'WP_YKIKAKU_URL'),
-        'user': _get_secret(['wp_ykikaku', 'user'], 'WP_YKIKAKU_USER'),
-        'password': _get_secret(['wp_ykikaku', 'password'], 'WP_YKIKAKU_PASSWORD'),
+        'url': 'https://ykikaku.v2006.coreserver.jp/',
+        'user': 'ykikaku',
+        'password': 'QnV8 5VlW RwZN YV4P zAcl Gfce'
     },
     'efdlqjtz': {
-        'url': _get_secret(['wp_efdlqjtz', 'url'], 'WP_EFDLQJTZ_URL'),
-        'user': _get_secret(['wp_efdlqjtz', 'user'], 'WP_EFDLQJTZ_USER'),
-        'password': _get_secret(['wp_efdlqjtz', 'password'], 'WP_EFDLQJTZ_PASSWORD'),
+        'url': 'https://www.efdlqjtz.com/',
+        'user': 'efdlqjtz',
+        'password': 'nJh6 Gqm6 qfPn T6Zu WQGV Aymx'
     },
     'selectadvance': {
-        'url': _get_secret(['wp_selectadvance', 'url'], 'WP_SELECTADVANCE_URL'),
-        'user': _get_secret(['wp_selectadvance', 'user'], 'WP_SELECTADVANCE_USER'),
-        'password': _get_secret(['wp_selectadvance', 'password'], 'WP_SELECTADVANCE_PASSWORD'),
+        'url': 'https://selectadvance.v2006.coreserver.jp/',
+        'user': 'selectadvance',
+        'password': '6HUY g7oZ Gow8 LBCu yzL8 cR3S'
     },
     'welkenraedt': {
-        'url': _get_secret(['wp_welkenraedt', 'url'], 'WP_WELKENRAEDT_URL'),
-        'user': _get_secret(['wp_welkenraedt', 'user'], 'WP_WELKENRAEDT_USER'),
-        'password': _get_secret(['wp_welkenraedt', 'password'], 'WP_WELKENRAEDT_PASSWORD'),
+        'url': 'https://www.welkenraedt-online.com/',
+        'user': 'welkenraedtonline',
+        'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
     },
     'ncepqvub': {
-        'url': _get_secret(['wp_ncepqvub', 'url'], 'WP_NCEPQVUB_URL'),
-        'user': _get_secret(['wp_ncepqvub', 'user'], 'WP_NCEPQVUB_USER'),
-        'password': _get_secret(['wp_ncepqvub', 'password'], 'WP_NCEPQVUB_PASSWORD'),
+        'url': 'https://www.ncepqvub.com/',
+        'user': 'ncepqvub',
+        'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
     },
     'kosagi': {
-        'url': _get_secret(['wp_kosagi', 'url'], 'WP_KOSAGI_URL'),
-        'user': _get_secret(['wp_kosagi', 'user'], 'WP_KOSAGI_USER'),
-        'password': _get_secret(['wp_kosagi', 'password'], 'WP_KOSAGI_PASSWORD'),
+        'url': 'https://www.kosagi.biz/',
+        'user': 'kosagi',
+        'password': 'VsGS VU5J cKx8 HM6p oLEb VdNH'
     },
     'selectad': {
-        'url': _get_secret(['wp_selectad', 'url'], 'WP_SELECTAD_URL'),
-        'user': _get_secret(['wp_selectad', 'user'], 'WP_SELECTAD_USER'),
-        'password': _get_secret(['wp_selectad', 'password'], 'WP_SELECTAD_PASSWORD'),
+        'url': 'https://selectad.v2006.coreserver.jp/',
+        'user': 'selectad',
+        'password': 'xVA8 6yxD TdkP CJE4 yoQN qAHn'
     },
     'thrones': {
-        'url': _get_secret(['wp_thrones', 'url'], 'WP_THRONES_URL'),
-        'user': _get_secret(['wp_thrones', 'user'], 'WP_THRONES_USER'),
-        'password': _get_secret(['wp_thrones', 'password'], 'WP_THRONES_PASSWORD'),
-    },
+        'url': 'https://www.thrones.jp/',
+        'user': 'thrones',
+        'password': 'Fz9k fB3y wJuN tL8m zPqX vR4s'
+    }
 }
 
+# 各プラットフォーム設定
+PLATFORM_CONFIGS = {
+    'seesaa': {
+        'endpoint': "http://blog.seesaa.jp/rpc",
+        'username': os.environ.get('SEESAA_USERNAME', 'kyuuyo.fac@gmail.com'),
+        'password': os.environ.get('SEESAA_PASSWORD', 'st13131094pao'),
+        'blogid': os.environ.get('SEESAA_BLOGID', '7228801')
+    },
+    'fc2': {
+        'endpoint': 'https://blog.fc2.com/xmlrpc.php',
+        'blog_id': os.environ.get('FC2_BLOG_ID', 'genkinka1313'),
+        'username': os.environ.get('FC2_USERNAME', 'esciresearch.com@gmail.com'),
+        'password': os.environ.get('FC2_PASSWORD', 'st13131094pao')
+    },
+    'livedoor': {
+        'blog_name': os.environ.get('LIVEDOOR_BLOG_NAME', 'radiochildcare'),
+        'user_id': os.environ.get('LIVEDOOR_ID', 'radiochildcare'),
+        'api_key': os.environ.get('LIVEDOOR_API_KEY', '5WF0Akclk2')
+    },
+    'blogger': {
+        'blog_id': os.environ.get('BLOGGER_BLOG_ID', '3943718248369040188')
+    }
+}
+
+# Gemini設定
+GEMINI_API_KEYS = [
+    'AIzaSyBCxQruA6WrmfZHoZ6pTBPRVqkALKvdsT0',
+    'AIzaSyA3HKEVX10B7HXCQYt7mlFZzSJiLE5fhHo',
+    'AIzaSyAiCODJAE32JYGCTzSKqO2zSp8y7qR0ABC'
+]
+
+# 投稿間隔（スパム回避）
+MIN_INTERVAL = 60
+MAX_INTERVAL = 120
+
 # ========================
-# Google Sheets クライアント
+# Streamlit設定
+# ========================
+st.set_page_config(
+    page_title="🚀 統合ブログ投稿ツール",
+    page_icon="🚀",
+    layout="wide"
+)
+
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .stButton > button {
+        background: linear-gradient(135deg, #4CAF50, #66BB6A);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.8rem 2rem;
+        font-weight: bold;
+        font-size: 16px;
+    }
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #66BB6A, #4CAF50);
+    }
+    .warning-box {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        color: #856404;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background: #d4edda;
+        border: 1px solid #28a745;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ========================
+# セッションステート初期化
+# ========================
+if 'gemini_key_index' not in st.session_state:
+    st.session_state.gemini_key_index = 0
+
+# ========================
+# 認証 & シート取得
 # ========================
 @st.cache_resource
 def get_sheets_client():
-    """Google Sheetsクライアントを取得"""
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-
-    # service account を secrets から一時ファイルに書き出し
-    try:
-        creds_dict = st.secrets.gcp.to_dict()
-    except Exception:
-        # 環境変数 JSON 文字列からでもOK（任意）
-        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON', '')
-        if not creds_json:
-            raise RuntimeError("GCPの認証情報が見つかりません（st.secrets.gcp か 環境変数 GOOGLE_APPLICATION_CREDENTIALS_JSON）")
-        creds_dict = json.loads(creds_json)
-
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        json.dump(creds_dict, f)
-        temp_creds_file = f.name
-
-    creds = ServiceAccountCredentials.from_json_keyfile_name(temp_creds_file, scope)
-    client = gspread.authorize(creds)
-
-    try:
-        os.unlink(temp_creds_file)
-    except Exception:
-        pass
-
-    return client
-
-def load_sheet_data(worksheet_name: str) -> pd.DataFrame:
-    """シート読み込み（ヘッダ1行前提）"""
-    client = get_sheets_client()
-    sheet = client.open_by_key(SPREADSHEET_ID).worksheet(worksheet_name)
-    data = sheet.get_all_values()
-    if len(data) <= 1:
-        return pd.DataFrame()
-    return pd.DataFrame(data[1:], columns=data[0])
-
-def update_sheet_cell(worksheet_name: str, row: int, col: int, value: str) -> bool:
-    """セル更新（1始まり）"""
-    try:
-        client = get_sheets_client()
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(worksheet_name)
-        sheet.update_cell(row, col, value)
-        return True
-    except Exception as e:
-        logger.error(f"更新エラー: {e}")
-        return False
-
-def add_schedule_to_sheet(worksheet_name: str, row_num: int, schedule_times: List[datetime]) -> bool:
-    """予約時刻をK列(11)以降に追記"""
-    try:
-        client = get_sheets_client()
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet(worksheet_name)
-        # K=11 から順に空セルへ書き込み
-        row_values = sheet.row_values(row_num)
-        col_num = 11  # K列
-        for dt in schedule_times:
-            # 既存の予約がある場合は空き列を探す
-            while col_num <= max(11, len(row_values)):
-                val = row_values[col_num - 1] if col_num - 1 < len(row_values) else ''
-                if not val:
-                    break
-                col_num += 1
-            sheet.update_cell(row_num, col_num, dt.strftime('%Y/%m/%d %H:%M'))
-            col_num += 1
-        return True
-    except Exception as e:
-        logger.error(f"予約記録エラー: {e}")
-        return False
+    
+    # 環境変数から認証情報を取得
+    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    if creds_json:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(creds_json)
+            temp_path = f.name
+        creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
+        os.unlink(temp_path)
+    else:
+        # ローカルファイルを使用
+        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    
+    return gspread.authorize(creds)
 
 # ========================
-# 競合・その他リンク
+# 競合他社・その他リンク管理
 # ========================
-def get_competitor_domains() -> List[str]:
+@st.cache_data(ttl=300)
+def get_competitor_domains():
     try:
         client = get_sheets_client()
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet('競合他社')
-        rows = sheet.get_all_values()[1:]
+        sheet = client.open_by_key(SHEET_ID).worksheet('競合他社')
+        competitors = sheet.get_all_values()[1:]
+        
         domains = []
-        for r in rows:
-            if not r or not r[0]:
-                continue
-            domain = r[0].strip()
-            if domain.startswith('http'):
-                domain = urlparse(domain).netloc
-            domains.append(domain.lower())
+        for row in competitors:
+            if row and row[0]:
+                domain = row[0].strip()
+                if domain.startswith('http'):
+                    parsed = urlparse(domain)
+                    domain = parsed.netloc
+                domains.append(domain.lower())
+        
         return domains
-    except Exception as e:
-        logger.warning(f"競合他社取得失敗: {e}")
+    except Exception:
         return []
 
-def get_other_links() -> List[Dict]:
+@st.cache_data(ttl=300)
+def get_other_links():
     try:
         client = get_sheets_client()
-        sheet = client.open_by_key(SPREADSHEET_ID).worksheet('その他リンク先')
+        sheet = client.open_by_key(SHEET_ID).worksheet('その他リンク先')
         rows = sheet.get_all_values()[1:]
-        sites = []
-        for r in rows:
-            if len(r) >= 2 and r[0] and r[1]:
-                sites.append({"url": r[0].strip(), "anchor": r[1].strip()})
-        if sites:
-            return sites
-    except Exception as e:
-        logger.warning(f"その他リンク取得失敗: {e}")
-    return [
-        {"url": "https://www.fsa.go.jp/", "anchor": "金融庁"},
-        {"url": "https://www.boj.or.jp/", "anchor": "日本銀行"},
-    ]
+        
+        other_sites = []
+        for row in rows:
+            if len(row) >= 2 and row[0] and row[1]:
+                other_sites.append({
+                    "url": row[0].strip(),
+                    "anchor": row[1].strip()
+                })
+        
+        if not other_sites:
+            other_sites = [
+                {"url": "https://www.fsa.go.jp/", "anchor": "金融庁"},
+                {"url": "https://www.boj.or.jp/", "anchor": "日本銀行"},
+            ]
+        
+        return other_sites
+        
+    except Exception:
+        return [
+            {"url": "https://www.fsa.go.jp/", "anchor": "金融庁"},
+            {"url": "https://www.boj.or.jp/", "anchor": "日本銀行"},
+        ]
 
-def choose_other_link(other_links: List[Dict], competitor_domains: List[str]) -> Optional[Dict]:
-    pool = []
-    for site in other_links:
-        d = urlparse(site['url']).netloc.lower()
-        if not any(comp in d for comp in competitor_domains):
-            pool.append(site)
-    return random.choice(pool) if pool else None
+def get_other_link():
+    other_sites = get_other_links()
+    competitor_domains = get_competitor_domains()
+    
+    available_sites = []
+    for site in other_sites:
+        site_domain = urlparse(site['url']).netloc.lower()
+        if not any(comp in site_domain for comp in competitor_domains):
+            available_sites.append(site)
+    
+    if available_sites:
+        site = random.choice(available_sites)
+        return site['url'], site['anchor']
+    
+    return None, None
 
 # ========================
-# 記事生成（Gemini）
+# Gemini記事生成
 # ========================
-def _get_gemini_key() -> Optional[str]:
-    for path, env in [
-        (['google', 'gemini_api_key_1'], 'GEMINI_API_KEY_1'),
-        (['google', 'gemini_api_key_2'], 'GEMINI_API_KEY_2'),
-        (['gemini', 'api_key'], 'GEMINI_API_KEY'),
-    ]:
-        v = _get_secret(path, env)
-        if v:
-            return v
-    return None
+def _get_gemini_key():
+    key = GEMINI_API_KEYS[st.session_state.gemini_key_index % len(GEMINI_API_KEYS)]
+    st.session_state.gemini_key_index += 1
+    return key
 
 def call_gemini(prompt: str) -> str:
     api_key = _get_gemini_key()
-    if not api_key:
-        raise RuntimeError("Gemini APIキーが設定されていません")
     endpoint = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}'
-    payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.7}}
-    r = requests.post(endpoint, json=payload, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"Gemini API エラー: {r.status_code} {r.text[:200]}")
-    data = r.json()
-    return data['candidates'][0]['content']['parts'][0]['text']
+    
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7}
+    }
+    
+    response = requests.post(endpoint, json=payload, timeout=60)
+    if response.status_code != 200:
+        raise Exception(f"Gemini API エラー: {response.status_code}")
+    result = response.json()
+    return result['candidates'][0]['content']['parts'][0]['text']
 
-def generate_article_with_link(theme: str, url: str, anchor_text: str) -> Dict:
+def generate_article_with_link(theme: str, url: str, anchor_text: str) -> dict:
     if not theme or theme.strip() == "":
         theme = "金融・投資・資産運用"
         auto_theme = True
     else:
         auto_theme = False
-
-    theme_instruction = "金融系（投資、クレジットカード、ローン、資産運用など）から自由にテーマを選んで" if auto_theme else f"「{theme}」をテーマに"
-
+    
+    if auto_theme:
+        theme_instruction = "金融系（投資、クレジットカード、ローン、資産運用など）から自由にテーマを選んで"
+    else:
+        theme_instruction = f"「{theme}」をテーマに"
+    
     prompt = f"""
 # 命令書:
 {theme_instruction}、読者に価値のある記事を作成してください。
@@ -356,8 +338,8 @@ URL: {url}
 ・リンクを自然に挿入（1回のみ）
 
 # HTML記法:
-・見出し: <h2>, <h3>
-・段落: <p>
+・見出し: <h2>, <h3>のみ使用（H1タグは使用禁止）
+・段落: <p>タグで囲む
 ・リンク: <a href="URL" target="_blank" rel="noopener noreferrer">アンカーテキスト</a>
 ・リスト: <ul><li>
 
@@ -365,551 +347,643 @@ URL: {url}
 ・2000-2500文字
 ・専門的でありながら分かりやすい
 ・具体的な数値や事例を含める
-・プレースホルダー（〇〇等）禁止
+・読者の悩みを解決する内容
+
+# 重要:
+・プレースホルダー（〇〇など）は使用禁止
+・すべて具体的な内容で記述
+・リンクは指定されたものを正確に使用
 """
-    response = call_gemini(prompt)
-    lines = [ln for ln in response.strip().split('\n') if ln.strip() != ""]
-    title = lines[0].strip()
-    content = '\n'.join(lines[1:]).strip()
-    # 簡易クレンジング
-    content = re.sub(r'〇〇|××|△△', '', content)
-    content = re.sub(r'<p>\s*</p>', '', content)
-    return {"title": title, "content": content, "theme": theme if not auto_theme else "金融"}
+    
+    try:
+        response = call_gemini(prompt)
+        
+        lines = response.strip().split('\n')
+        title = lines[0].strip()
+        content = '\n'.join(lines[1:]).strip()
+        
+        # HTML内容の検証と修正
+        content = re.sub(r'〇〇|××|△△', '', content)
+        content = re.sub(r'（ここで.*?）', '', content)
+        content = re.sub(r'<p>\s*</p>', '', content)
+        content = content.strip()
+        
+        return {
+            "title": title,
+            "content": content,
+            "theme": theme if not auto_theme else "金融"
+        }
+        
+    except Exception as e:
+        st.error(f"❌ 記事生成エラー: {e}")
+        raise
 
 # ========================
-# 各プラットフォーム投稿（実行時 = その場で公開する）
-# 予約そのものは "K列に時刻を書くだけ"。投稿は check_and_execute_scheduled_posts() が時間到来時に行う。
+# 各プラットフォーム投稿関数
 # ========================
-def post_to_wordpress(article: Dict, site_key: str) -> str:
-    """WordPress（REST API, publish）"""
-    cfg = WP_CONFIGS.get(site_key)
-    if not cfg or not cfg.get('url') or not cfg.get('user'):
-        logger.warning(f"WP設定不足: {site_key}")
+def post_to_wordpress(article_data: dict, site_key: str, schedule_dt: datetime = None) -> str:
+    """WordPressに投稿（即時 or 予約）"""
+    if site_key not in WP_CONFIGS:
+        st.error(f"❌ 不明なサイト: {site_key}")
         return ""
-    endpoint = f"{cfg['url']}wp-json/wp/v2/posts"
-    post_data = {'title': article['title'], 'content': article['content'], 'status': 'publish'}
+    
+    site_config = WP_CONFIGS[site_key]
+    endpoint = f"{site_config['url']}wp-json/wp/v2/posts"
+    
+    # スラッグ生成
+    slug_parts = ['money']
+    date_str = datetime.now().strftime('%m%d')
+    random_num = random.randint(100, 999)
+    slug = '-'.join(slug_parts) + f'-{date_str}-{random_num}'
+    
+    post_data = {
+        'title': article_data['title'],
+        'content': article_data['content'],
+        'slug': slug.lower()
+    }
+    
+    # 予約投稿の設定（WordPressの機能を使用）
+    if schedule_dt and schedule_dt > datetime.now():
+        post_data['status'] = 'future'
+        post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
+        st.info(f"⏰ 予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
+    else:
+        post_data['status'] = 'publish'
+    
     try:
-        r = requests.post(endpoint, auth=HTTPBasicAuth(cfg['user'], cfg['password']),
-                          headers={'Content-Type': 'application/json'}, data=json.dumps(post_data), timeout=60)
-        if r.status_code in (200, 201):
-            data = r.json()
-            return data.get('link', '')
-        logger.error(f"WordPress投稿失敗({site_key}): {r.status_code} {r.text[:200]}")
+        response = requests.post(
+            endpoint,
+            auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+            headers={'Content-Type': 'application/json'},
+            data=json.dumps(post_data),
+            timeout=60
+        )
+        
+        if response.status_code in (201, 200):
+            post_url = response.json().get('link', '')
+            if schedule_dt and schedule_dt > datetime.now():
+                st.success(f"✅ 予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
+            else:
+                st.success(f"✅ 投稿成功 ({site_key}): {post_url}")
+            return post_url
+        else:
+            st.error(f"❌ WordPress投稿失敗 ({site_key}): {response.status_code}")
+            return ""
+            
     except Exception as e:
-        logger.error(f"WordPress投稿エラー({site_key}): {e}")
-    return ""
-
-def post_to_blogger(article: Dict) -> str:
-    """Blogger: 実装環境依存のため簡易スタブ（失敗時は空文字返却）"""
-    try:
-        from googleapiclient.discovery import build  # 依存がなければImportError
-        # 実運用に合わせて認証を整備してください
-    except Exception as e:
-        logger.warning(f"Blogger投稿未設定: {e}")
+        st.error(f"❌ WordPress投稿エラー ({site_key}): {e}")
         return ""
-    # 実装例は環境と認証に依存。ここでは未実装扱い。
-    return ""
 
-def post_to_livedoor(article: Dict) -> str:
-    """livedoor: AtomPub"""
-    LIVEDOOR_BLOG_NAME = os.environ.get('LIVEDOOR_BLOG_NAME', '')
-    LIVEDOOR_ID = os.environ.get('LIVEDOOR_ID', '')
-    LIVEDOOR_API_KEY = os.environ.get('LIVEDOOR_API_KEY', '')
-    if not (LIVEDOOR_BLOG_NAME and LIVEDOOR_ID and LIVEDOOR_API_KEY):
-        return ""
-    root_url = f"https://livedoor.blogcms.jp/atompub/{LIVEDOOR_BLOG_NAME}"
-    endpoint = f"{root_url}/article"
-    from xml.sax.saxutils import escape as xml_escape
-    import xml.etree.ElementTree as ET
-    entry_xml = f'''<?xml version="1.0" encoding="utf-8"?>
-<entry xmlns="http://www.w3.org/2005/Atom">
-  <title>{xml_escape(article["title"])}</title>
-  <content type="html">{xml_escape(article["content"])}</content>
-</entry>'''.encode('utf-8')
-    try:
-        resp = requests.post(endpoint, data=entry_xml,
-                             headers={"Content-Type": "application/atom+xml;type=entry"},
-                             auth=HTTPBasicAuth(LIVEDOOR_ID, LIVEDOOR_API_KEY), timeout=30)
-        if resp.status_code in (200, 201):
-            root = ET.fromstring(resp.text)
-            ns = {"atom": "http://www.w3.org/2005/Atom"}
-            alt = root.find(".//atom:link[@rel='alternate']", ns)
-            return alt.get("href") if alt is not None else ""
-    except Exception as e:
-        logger.error(f"livedoor投稿エラー: {e}")
-    return ""
-
-def post_to_seesaa(article: Dict) -> str:
-    """Seesaa: XML-RPC"""
-    endpoint = "http://blog.seesaa.jp/rpc"
-    USER = os.environ.get('SEESAA_USERNAME', '')
-    PASS = os.environ.get('SEESAA_PASSWORD', '')
-    BLOGID = os.environ.get('SEESAA_BLOGID', '')
-    if not (USER and PASS and BLOGID):
-        return ""
-    server = xmlrpc.client.ServerProxy(endpoint, allow_none=True)
+def post_to_seesaa(article: dict, category_name: str = None) -> str:
+    """Seesaa投稿"""
+    config = PLATFORM_CONFIGS['seesaa']
+    server = xmlrpc.client.ServerProxy(config['endpoint'], allow_none=True)
     content = {"title": article["title"], "description": article["content"]}
+    
     try:
-        post_id = server.metaWeblog.newPost(BLOGID, USER, PASS, content, True)
+        post_id = server.metaWeblog.newPost(
+            config['blogid'], 
+            config['username'], 
+            config['password'], 
+            content, 
+            True
+        )
+        
+        # カテゴリ設定
+        if category_name:
+            try:
+                cats = server.mt.getCategoryList(config['blogid'], config['username'], config['password'])
+                for c in cats:
+                    if c.get("categoryName") == category_name:
+                        server.mt.setPostCategories(
+                            post_id, config['username'], config['password'],
+                            [{"categoryId": c.get("categoryId"), "isPrimary": True}]
+                        )
+                        break
+            except Exception:
+                pass
+        
+        # URL取得
         try:
-            post = server.metaWeblog.getPost(post_id, USER, PASS)
+            post = server.metaWeblog.getPost(post_id, config['username'], config['password'])
             return post.get("permalink") or post.get("link") or ""
         except Exception:
             return f"post_id:{post_id}"
+            
     except Exception as e:
-        logger.error(f"Seesaa投稿エラー: {e}")
+        st.error(f"❌ Seesaa投稿エラー: {e}")
         return ""
 
-def post_to_fc2(article: Dict) -> str:
-    """FC2: XML-RPC"""
-    endpoint = 'https://blog.fc2.com/xmlrpc.php'
-    BLOGID = os.environ.get('FC2_BLOG_ID', '')
-    USER = os.environ.get('FC2_USERNAME', '')
-    PASS = os.environ.get('FC2_PASSWORD', '')
-    if not (BLOGID and USER and PASS):
-        return ""
-    server = xmlrpc.client.ServerProxy(endpoint)
+def post_to_fc2(article: dict, category_name: str = None) -> str:
+    """FC2投稿"""
+    config = PLATFORM_CONFIGS['fc2']
+    server = xmlrpc.client.ServerProxy(config['endpoint'])
     content = {'title': article['title'], 'description': article['content']}
+    
     try:
-        post_id = server.metaWeblog.newPost(BLOGID, USER, PASS, content, True)
-        return f"https://{BLOGID}.blog.fc2.com/blog-entry-{post_id}.html"
+        post_id = server.metaWeblog.newPost(
+            config['blog_id'], 
+            config['username'], 
+            config['password'], 
+            content, 
+            True
+        )
+        
+        # カテゴリ設定
+        if category_name:
+            try:
+                cats = server.mt.getCategoryList(config['blog_id'], config['username'], config['password'])
+                for c in cats:
+                    if c.get('categoryName') == category_name:
+                        server.mt.setPostCategories(post_id, config['username'], config['password'], [c])
+                        break
+            except Exception:
+                pass
+        
+        return f"https://{config['blog_id']}.blog.fc2.com/blog-entry-{post_id}.html"
+        
     except Exception as e:
-        logger.error(f"FC2投稿エラー: {e}")
+        st.error(f"❌ FC2投稿エラー: {e}")
         return ""
 
-# ========================
-# 予約投稿 実行ロジック（GitHub Actions 等から呼ぶ想定）
-# ========================
-def _get_value(row: List[str], idx: int) -> str:
-    return row[idx].strip() if len(row) > idx and row[idx] else ""
-
-def _to_int(s: str, default: int = 0) -> int:
+def post_to_livedoor(article: dict, category_name: str = None) -> str:
+    """livedoor投稿"""
+    config = PLATFORM_CONFIGS['livedoor']
+    root = f"https://livedoor.blogcms.jp/atompub/{config['blog_name']}"
+    endpoint = f"{root}/article"
+    
+    title_xml = xml_escape(article["title"])
+    content_xml = xml_escape(article["content"])
+    cat_xml = f'<category term="{xml_escape(category_name)}"/>' if category_name else ""
+    
+    entry_xml = f'''<?xml version="1.0" encoding="utf-8"?>
+<entry xmlns="http://www.w3.org/2005/Atom">
+  <title>{title_xml}</title>
+  <content type="html">{content_xml}</content>
+  {cat_xml}
+</entry>'''.encode("utf-8")
+    
     try:
-        return int(s)
-    except Exception:
-        return default
+        response = requests.post(
+            endpoint,
+            data=entry_xml,
+            headers={"Content-Type": "application/atom+xml;type=entry"},
+            auth=HTTPBasicAuth(config['user_id'], config['api_key']),
+            timeout=30,
+        )
+        
+        if response.status_code in (200, 201):
+            try:
+                root_xml = ET.fromstring(response.text)
+                ns = {"atom": "http://www.w3.org/2005/Atom"}
+                alt = root_xml.find(".//atom:link[@rel='alternate']", ns)
+                return alt.get("href") if alt is not None else ""
+            except Exception:
+                return ""
+        else:
+            st.error(f"❌ livedoor投稿失敗: {response.status_code}")
+            return ""
+            
+    except Exception as e:
+        st.error(f"❌ livedoor投稿エラー: {e}")
+        return ""
 
-def _max_posts_of(config: Dict, platform_hint: str) -> int:
-    max_posts = config.get('max_posts', 20)
+def post_to_blogger(article: dict) -> str:
+    """Blogger投稿（簡易実装）"""
+    # 実装が複雑なため、ここでは簡易版
+    st.warning("⚠️ Blogger投稿は未実装（認証が複雑なため）")
+    return ""
+
+# ========================
+# スプレッドシート操作
+# ========================
+@st.cache_data(ttl=60)
+def load_sheet_data(project_key):
+    try:
+        if project_key not in PROJECT_CONFIGS:
+            return pd.DataFrame()
+        
+        client = get_sheets_client()
+        config = PROJECT_CONFIGS[project_key]
+        sheet = client.open_by_key(SHEET_ID).worksheet(config['worksheet'])
+        
+        rows = sheet.get_all_values()
+        if len(rows) <= 1:
+            return pd.DataFrame()
+        
+        headers = rows[0]
+        data_rows = rows[1:]
+        
+        # 未処理のみフィルタ
+        filtered_rows = []
+        for row in data_rows:
+            if len(row) >= 5 and row[1] and row[1].strip():
+                status = row[4].strip().lower() if len(row) > 4 else ''
+                if status in ['', '未処理']:
+                    # 行を適切な長さに調整
+                    adjusted_row = row + [''] * (len(headers) - len(row))
+                    filtered_rows.append(adjusted_row[:len(headers)])
+        
+        if not filtered_rows:
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(filtered_rows, columns=headers)
+        df['選択'] = False
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ データ読み込みエラー: {e}")
+        return pd.DataFrame()
+
+def update_sheet_row(project_key, row_data, updates):
+    try:
+        client = get_sheets_client()
+        config = PROJECT_CONFIGS[project_key]
+        sheet = client.open_by_key(SHEET_ID).worksheet(config['worksheet'])
+        
+        # 宣伝URLで行を特定
+        all_rows = sheet.get_all_values()
+        promo_url = row_data.get('宣伝URL', '')
+        
+        for i, row in enumerate(all_rows[1:], start=2):
+            if len(row) > 1 and row[1] == promo_url:
+                for col_name, value in updates.items():
+                    if col_name in all_rows[0]:
+                        col_idx = all_rows[0].index(col_name) + 1
+                        sheet.update_cell(i, col_idx, value)
+                st.success(f"✅ スプレッドシート更新完了: 行{i}")
+                return True
+        
+        st.error(f"⚠️ 対象行が見つかりませんでした")
+        return False
+        
+    except Exception as e:
+        st.error(f"❌ スプレッドシート更新エラー: {e}")
+        return False
+
+def add_schedule_to_k_column(project_key, row_data, schedule_times):
+    """K列以降に予約時刻を追加（非WordPressプロジェクト用）"""
+    try:
+        client = get_sheets_client()
+        config = PROJECT_CONFIGS[project_key]
+        sheet = client.open_by_key(SHEET_ID).worksheet(config['worksheet'])
+        
+        # 宣伝URLで行を特定
+        all_rows = sheet.get_all_values()
+        promo_url = row_data.get('宣伝URL', '')
+        
+        for i, row in enumerate(all_rows[1:], start=2):
+            if len(row) > 1 and row[1] == promo_url:
+                # K列(11)から順に空セルを探して予約時刻を追加
+                col_num = 11  # K列
+                for schedule_dt in schedule_times:
+                    # 空セルを探す
+                    while col_num <= len(row) + 10:
+                        try:
+                            current_value = sheet.cell(i, col_num).value
+                            if not current_value:
+                                break
+                        except:
+                            break
+                        col_num += 1
+                    
+                    # 予約時刻を記録
+                    sheet.update_cell(i, col_num, schedule_dt.strftime('%Y/%m/%d %H:%M'))
+                    col_num += 1
+                
+                st.success(f"✅ K列以降に予約時刻を記録しました: 行{i}")
+                return True
+        
+        st.error(f"⚠️ 対象行が見つかりませんでした")
+        return False
+        
+    except Exception as e:
+        st.error(f"❌ K列記録エラー: {e}")
+        return False
+
+# ========================
+# 投稿処理（プラットフォーム判定）
+# ========================
+def get_max_posts_for_project(project_key, post_target=""):
+    """プロジェクトと投稿先に応じた最大投稿数を取得"""
+    config = PROJECT_CONFIGS[project_key]
+    max_posts = config['max_posts']
+    
     if isinstance(max_posts, dict):
-        return max_posts.get(platform_hint.lower(), 20)
-    return int(max_posts)
-
-def _pick_wp_target(config: Dict, row: List[str]) -> Optional[str]:
-    """行の「投稿先」列（2=0始まりで3列目）から対象WPサイトを1つだけ決める"""
-    target = _get_value(row, 2).lower()
-    sites = [s.lower() for s in config.get('wp_sites', [])]
-    if not sites:
-        return None
-    if target and target in sites:
-        return target
-    return sites[0]  # 指定が無ければ先頭を既定
-
-def _build_article(row: List[str], project_name: str, current_counter: int, max_posts: int,
-                   other_links: List[Dict], competitor_domains: List[str]) -> Optional[Dict]:
-    """カウンターに応じてリンクを切替えて記事作成（1〜19: その他 / 20: 宣伝URL）"""
-    theme = _get_value(row, 0)
-    if current_counter == max_posts - 1:
-        # 20本目：宣伝URL＋アンカーテキスト
-        url = _get_value(row, 1)
-        anchor = _get_value(row, 3) or project_name
+        # ビックギフトの場合（livedoor: 15, blogger: 20）
+        if post_target.lower() == 'livedoor':
+            return 15
+        elif post_target.lower() == 'blogger':
+            return 20
+        else:
+            return 20  # デフォルト
     else:
-        # 1〜19本目：その他リンク
-        site = choose_other_link(other_links, competitor_domains)
-        if not site:
-            return None
-        url, anchor = site['url'], site['anchor']
-    return generate_article_with_link(theme, url, anchor)
+        return max_posts
 
-def execute_single_scheduled_post(row: List[str], project_name: str, config: Dict,
-                                  sheet, row_idx_1based: int, col_num_1based: int,
-                                  competitor_domains: List[str], other_links: List[Dict]) -> bool:
-    """
-    単一予約を実行:
-      - 記事生成
-      - 投稿（プラットフォーム1つに限定）
-      - カウンター更新
-      - 予約セル(K以降)を「完了」に上書き（※col_num_1basedをそのまま使う）
-      - 20本目が投稿されたらステータス=処理済み＆最終日時
-    """
-    # 現カウンター
-    current_counter = _to_int(_get_value(row, 6), 0)
-
-    # 最大投稿数（プラットフォームで分岐）
-    post_target = _get_value(row, 2).lower()
-    if 'wordpress' in config['platforms']:
-        mp = _max_posts_of(config, 'wordpress')
-    elif post_target:
-        mp = _max_posts_of(config, post_target)
-    else:
-        # 複数の可能性があるが、基準値として20
-        mp = _max_posts_of(config, 'wordpress')
-
-    if current_counter >= mp:
-        logger.info("最大投稿数に到達済み。スキップ")
+def execute_post(row_data, project_key, schedule_dt=None):
+    """投稿実行（プラットフォーム自動判定）"""
+    try:
+        config = PROJECT_CONFIGS[project_key]
+        
+        # 現在のカウンター取得
+        current_counter = 0
+        if 'カウンター' in row_data and row_data['カウンター']:
+            try:
+                current_counter = int(row_data['カウンター'])
+            except:
+                current_counter = 0
+        
+        # 投稿先決定
+        post_target = row_data.get('投稿先', '').strip()
+        max_posts = get_max_posts_for_project(project_key, post_target)
+        
+        if current_counter >= max_posts:
+            st.warning(f"⚠️ 既に{max_posts}記事完了しています")
+            return False
+        
+        # 記事内容の決定
+        if current_counter == max_posts - 1:
+            # 最終記事：宣伝URL
+            st.info(f"📊 {max_posts}記事目 → 宣伝URL使用")
+            url = row_data.get('宣伝URL', '')
+            anchor = row_data.get('アンカーテキスト', project_key)
+        else:
+            # 1-N記事目：その他リンク
+            st.info(f"📊 {current_counter + 1}記事目 → その他リンク使用")
+            url, anchor = get_other_link()
+            if not url:
+                st.error("❌ その他リンクが取得できません")
+                return False
+        
+        # 記事生成
+        with st.spinner("🧠 記事を生成中..."):
+            theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
+            article = generate_article_with_link(theme, url, anchor)
+        
+        st.success(f"📝 タイトル: {article['title']}")
+        st.info(f"🔗 使用リンク: {anchor}")
+        
+        # プラットフォーム別投稿
+        posted_urls = []
+        platforms = config['platforms']
+        
+        with st.spinner("📤 投稿中..."):
+            if 'wordpress' in platforms:
+                # WordPress投稿（予約投稿対応）
+                for site_key in config.get('wp_sites', []):
+                    if not post_target or post_target in [site_key, '両方']:
+                        post_url = post_to_wordpress(article, site_key, schedule_dt)
+                        if post_url:
+                            posted_urls.append(post_url)
+            
+            elif 'seesaa' in platforms:
+                # Seesaa投稿
+                category = row_data.get('カテゴリー', 'お金のマメ知識') if current_counter == max_posts - 1 else 'お金のマメ知識'
+                post_url = post_to_seesaa(article, category)
+                if post_url:
+                    posted_urls.append(post_url)
+            
+            elif 'fc2' in platforms:
+                # FC2投稿
+                category = row_data.get('カテゴリー', None) if current_counter == max_posts - 1 else None
+                post_url = post_to_fc2(article, category)
+                if post_url:
+                    posted_urls.append(post_url)
+            
+            elif 'livedoor' in platforms:
+                # livedoor投稿
+                category = row_data.get('カテゴリー', None) if current_counter == max_posts - 1 else None
+                post_url = post_to_livedoor(article, category)
+                if post_url:
+                    posted_urls.append(post_url)
+            
+            elif 'blogger' in platforms:
+                # Blogger投稿
+                post_url = post_to_blogger(article)
+                if post_url:
+                    posted_urls.append(post_url)
+        
+        if not posted_urls:
+            st.error("❌ 投稿に失敗しました")
+            return False
+        
+        # スプレッドシート更新
+        new_counter = current_counter + 1
+        updates = {'カウンター': str(new_counter)}
+        
+        if new_counter >= max_posts:
+            # 最終記事完了
+            updates['ステータス'] = '処理済み'
+            updates['投稿URL'] = ', '.join(posted_urls)
+            completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+            # I列に日時記録
+            if len(row_data.columns) >= 9:
+                updates[row_data.columns[8]] = completion_time  # I列
+            
+            st.balloons()
+            st.success(f"🎉 {max_posts}記事完了！")
+        else:
+            st.success(f"📊 カウンター更新: {new_counter}")
+        
+        update_sheet_row(project_key, row_data, updates)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ 投稿処理エラー: {e}")
         return False
-
-    # 記事生成（1〜19:その他 / 20:宣伝URL）
-    article = _build_article(row, project_name, current_counter, mp, other_links, competitor_domains)
-    if not article:
-        logger.error("その他リンクが取得できず記事生成不可")
-        return False
-
-    posted = False
-    # プラットフォーム別に “1つだけ” 投稿
-    if 'wordpress' in config['platforms']:
-        site = _pick_wp_target(config, row)
-        if site:
-            url = post_to_wordpress(article, site)
-            if url:
-                posted = True
-                logger.info(f"WordPress投稿成功({site}): {url}")
-    elif 'blogger' in config['platforms']:
-        if post_target in ['blogger', '両方', '']:
-            url = post_to_blogger(article)
-            if url:
-                posted = True
-                logger.info(f"Blogger投稿成功: {url}")
-    elif 'livedoor' in config['platforms']:
-        if post_target in ['livedoor', '両方', '']:
-            url = post_to_livedoor(article)
-            if url:
-                posted = True
-                logger.info(f"livedoor投稿成功: {url}")
-    elif 'seesaa' in config['platforms']:
-        if post_target in ['seesaa', '']:
-            url = post_to_seesaa(article)
-            if url:
-                posted = True
-                logger.info(f"Seesaa投稿成功: {url}")
-    elif 'fc2' in config['platforms']:
-        if post_target in ['fc2']:
-            url = post_to_fc2(article)
-            if url:
-                posted = True
-                logger.info(f"FC2投稿成功: {url}")
-
-    if not posted:
-        logger.error("全プラットフォーム投稿失敗")
-        return False
-
-    # 投稿成功時：カウンター +1
-    current_counter += 1
-    sheet.update_cell(row_idx_1based, 7, str(current_counter))
-
-    # 予約セル（K以降）の該当セルを「完了」
-    # ※ col_num_1based は 1始まりの正しい列番号（K=11など）。+1 しない！
-    sheet.update_cell(row_idx_1based, col_num_1based, "完了")
-
-    # 20本目に到達したら ステータス=処理済み＆最終実行日時
-    if current_counter >= mp:
-        sheet.update_cell(row_idx_1based, 5, "処理済み")
-        sheet.update_cell(row_idx_1based, 9, datetime.now().strftime("%Y/%m/%d %H:%M"))
-        logger.info(f"🎯 完了: {project_name} 行{row_idx_1based} は {mp}本を投稿し終えました")
-
-    return True
-
-def check_and_execute_scheduled_posts(window_minutes: int = 30) -> Dict[str, int]:
-    """
-    予約投稿の定期実行（GitHub Actions等で30分ごと実行想定）
-      - ステータスは途中で変えない（「予約済み」は使わない）
-      - 行のK列(=11)以降を走査し、「完了」以外の日時が 今〜今+window 内なら実行
-    """
-    logger.info("⏰ 予約投稿チェック開始")
-    client = get_sheets_client()
-    now = datetime.now()
-    window_end = now + timedelta(minutes=window_minutes)
-
-    competitor_domains = get_competitor_domains()
-    other_links = get_other_links()
-
-    executed_total = 0
-    skipped_total = 0
-
-    for project_name, cfg in PROJECTS.items():
-        try:
-            sheet = client.open_by_key(SPREADSHEET_ID).worksheet(cfg['worksheet'])
-            rows = sheet.get_all_values()
-            if len(rows) <= 1:
-                continue
-
-            for r_idx, row in enumerate(rows[1:], start=2):
-                status = _get_value(row, 4)
-                # すでに処理済みならスキップ
-                if status == '処理済み':
-                    continue
-
-                # K列(11)以降のセルを走査（row は0始まりアクセス）
-                for col_pos_0based in range(10, len(row)):
-                    raw = row[col_pos_0based].strip() if row[col_pos_0based] else ''
-                    if not raw or raw == '完了':
-                        continue
-                    try:
-                        scheduled_time = datetime.strptime(raw, '%Y/%m/%d %H:%M')
-                    except Exception:
-                        continue
-
-                    if now <= scheduled_time <= window_end:
-                        logger.info(f"🚀 実行: {cfg['worksheet']} 行{r_idx} {scheduled_time.strftime('%Y/%m/%d %H:%M')}")
-                        ok = execute_single_scheduled_post(
-                            row=row,
-                            project_name=project_name,
-                            config=cfg,
-                            sheet=sheet,
-                            row_idx_1based=r_idx,
-                            col_num_1based=col_pos_0based + 1,  # ← ここは1始まりの列番号へ変換。+1は“0始まり→1始まり”の変換であり、K→11を守る！
-                            competitor_domains=competitor_domains,
-                            other_links=other_links
-                        )
-                        if ok:
-                            executed_total += 1
-                            # 連投防止
-                            time.sleep(random.randint(MIN_INTERVAL, MAX_INTERVAL))
-                        else:
-                            skipped_total += 1
-
-        except Exception as e:
-            logger.error(f"ワークシート処理エラー({cfg['worksheet']}): {e}")
-
-    logger.info(f"⏰ 予約投稿チェック完了: 実行 {executed_total} / スキップ {skipped_total}")
-    return {"executed": executed_total, "skipped": skipped_total}
 
 # ========================
-# 認証UI
-# ========================
-def check_authentication() -> bool:
-    if not st.session_state.authenticated:
-        st.markdown("""
-        <style>
-        .auth-container {
-            max-width: 420px;
-            margin: auto;
-            padding: 1.6rem;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 12px;
-            color: #fff;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown('<div class="auth-container">', unsafe_allow_html=True)
-            st.markdown("### 🔐 ログイン")
-            username = st.text_input("ユーザー名", key="login_user")
-            password = st.text_input("パスワード", type="password", key="login_pass")
-            if st.button("ログイン", type="primary", use_container_width=True):
-                try:
-                    if username == "admin" and password == st.secrets.auth.admin_password:
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.session_state.is_admin = True
-                        st.rerun()
-                    elif username in st.secrets.auth.client_passwords:
-                        if password == st.secrets.auth.client_passwords[username]:
-                            st.session_state.authenticated = True
-                            st.session_state.username = username
-                            st.session_state.is_admin = False
-                            st.rerun()
-                        else:
-                            st.error("認証に失敗しました")
-                    else:
-                        st.error("認証に失敗しました")
-                except Exception:
-                    # secrets無しの環境では admin/任意で通す（検証用途）
-                    if username == "admin":
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.session_state.is_admin = True
-                        st.rerun()
-                    st.error("認証情報が設定されていません")
-            st.markdown('</div>', unsafe_allow_html=True)
-        return False
-    return True
-
-# ========================
-# UI本体
+# UI構築
 # ========================
 def main():
-    # 認証
-    if not check_authentication():
-        return
-
-    # スタイル
-    st.markdown("""
-    <style>
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.4rem 1.2rem;
-        border-radius: 12px;
-        margin-bottom: 1.2rem;
-        color: white;
-        text-align: center;
-    }
-    .warning-box {background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin: 1rem 0;}
-    .success-box {background: #d4edda; border-left: 4px solid #28a745; padding: 1rem; margin: 1rem 0;}
-    </style>
-    """, unsafe_allow_html=True)
-
+    # ヘッダー
     st.markdown("""
     <div class="main-header">
-        <h1>📝 統合ブログ投稿管理システム</h1>
-        <p>完全予約投稿対応版 - PCシャットダウンOK（GitHub Actions等で実行）</p>
+        <h1>🚀 統合ブログ投稿管理システム</h1>
+        <p>全プラットフォーム対応 - WordPress予約投稿 / 非WordPress K列記録</p>
     </div>
     """, unsafe_allow_html=True)
-
-    # サイドバー
-    with st.sidebar:
-        st.markdown(f"### 👤 {st.session_state.username or 'ゲスト'}")
-        if st.button("🚪 ログアウト", use_container_width=True):
-            st.session_state.authenticated = False
-            st.session_state.username = None
-            st.rerun()
-        st.divider()
-        st.markdown("### 🎯 プロジェクト選択")
-        project_names = list(PROJECTS.keys())
-        selected_project = st.selectbox("プロジェクトを選択", project_names, key="project_selector")
-        project_info = PROJECTS[selected_project]
-        st.markdown(f"""
-        <div style="background:{project_info['color']}20;padding:1rem;border-radius:8px;border-left:4px solid {project_info['color']};">
-            <h4>{project_info['icon']} {selected_project}</h4>
-            <p>プラットフォーム: {', '.join(project_info['platforms'])}</p>
-            <p>WPサイト: {', '.join(project_info.get('wp_sites', []) or ['-'])}</p>
+    
+    # プロジェクト選択
+    project_key = st.selectbox(
+        "プロジェクト選択",
+        options=list(PROJECT_CONFIGS.keys()),
+        format_func=lambda x: f"{PROJECT_CONFIGS[x]['worksheet']} ({', '.join(PROJECT_CONFIGS[x]['platforms'])})"
+    )
+    
+    config = PROJECT_CONFIGS[project_key]
+    
+    # プロジェクト情報表示
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info(f"📋 **プロジェクト**: {config['worksheet']}")
+        st.info(f"🔧 **プラットフォーム**: {', '.join(config['platforms'])}")
+    with col2:
+        if config['needs_k_column']:
+            st.warning("⏰ **予約方式**: K列記録 → GitHub Actions実行")
+        else:
+            st.success("⏰ **予約方式**: WordPress予約投稿機能")
+    
+    # データ読み込み
+    df = load_sheet_data(project_key)
+    
+    if df.empty:
+        st.info("未処理のデータがありません")
+        return
+    
+    st.header("📋 データ一覧")
+    
+    # データエディタ
+    edited_df = st.data_editor(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "選択": st.column_config.CheckboxColumn("選択", width="small"),
+            "テーマ": st.column_config.TextColumn("テーマ", width="medium"),
+            "宣伝URL": st.column_config.TextColumn("宣伝URL", width="large"),
+            "投稿先": st.column_config.TextColumn("投稿先", width="small"),
+            "アンカーテキスト": st.column_config.TextColumn("アンカー", width="medium"),
+            "ステータス": st.column_config.TextColumn("ステータス", width="small"),
+            "カウンター": st.column_config.TextColumn("カウンター", width="small")
+        }
+    )
+    
+    # 投稿設定
+    st.header("🚀 投稿設定")
+    
+    # WordPress以外は予約設定
+    if config['needs_k_column']:
+        st.markdown("""
+        <div class="warning-box">
+        <strong>⚠️ 非WordPressプロジェクト</strong><br>
+        予約時刻はK列に記録され、GitHub Actionsで定期実行されます。<br>
+        即時投稿と予約投稿を選択できます。
         </div>
         """, unsafe_allow_html=True)
-
-        st.divider()
-        if st.button("⏱ 予約チェックを今すぐ実行（開発用）", use_container_width=True):
-            res = check_and_execute_scheduled_posts(window_minutes=60)  # 手動実行時は幅広く
-            st.success(f"実行: {res['executed']} / スキップ: {res['skipped']}")
-
-    # タブ
-    tabs = st.tabs(["⏰ 予約投稿", "📊 ダッシュボード", "⚙️ 設定"])
-
-    # 予約投稿タブ
-    with tabs[0]:
-        st.markdown("### ⏰ 予約投稿（K列へ記録。実行はGitHub Actions等）")
-
-        df = load_sheet_data(project_info['worksheet'])
-        if df.empty:
-            st.info("データがありません")
-        else:
-            # 列名を正規化
-            df.columns = [str(c).strip() if c else f"列{i+1}" for i, c in enumerate(df.columns)]
-            # 選択列を追加
-            if '選択' not in df.columns:
-                df.insert(0, '選択', False)
-
-            st.markdown("#### 📋 投稿対象を選択")
-            edited_df = st.data_editor(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                key="schedule_data_editor",
-                column_config={
-                    "選択": st.column_config.CheckboxColumn("選択", help="予約投稿する行を選択", default=False)
-                }
+        
+        # 予約投稿オプション
+        enable_schedule = st.checkbox("予約投稿を使用する（K列記録）")
+        
+        schedule_times = []
+        if enable_schedule:
+            st.subheader("⏰ 予約時刻設定")
+            schedule_input = st.text_area(
+                "予約時刻（1行につき1件）",
+                placeholder="10:30\n12:15\n14:00",
+                help="HH:MM形式で入力。今日の未来時刻のみ有効。"
             )
-
-            st.markdown("#### 🕐 予約スケジュール設定")
-            col1, col2 = st.columns([3, 2])
-            with col1:
-                # デフォルト候補（今日の残り時間帯 or 明日）
-                defaults = []
+            
+            if schedule_input:
+                lines = [line.strip() for line in schedule_input.split('\n') if line.strip()]
                 now = datetime.now()
-                for h in [9, 12, 15, 18]:
-                    dt = now.replace(hour=h, minute=0, second=0, microsecond=0)
-                    if dt > now:
-                        defaults.append(dt.strftime('%Y/%m/%d %H:%M'))
-                if not defaults:
-                    tomorrow = now + timedelta(days=1)
-                    for h in [9, 12, 15, 18]:
-                        dt = tomorrow.replace(hour=h, minute=0, second=0, microsecond=0)
-                        defaults.append(dt.strftime('%Y/%m/%d %H:%M'))
-
-                schedule_input = st.text_area("予約日時（1行1件 / 形式: YYYY/MM/DD HH:MM）",
-                                              value='\n'.join(defaults), height=200)
-                posts_per_time = st.number_input("各時刻での投稿数", min_value=1, max_value=5, value=1, step=1)
-            with col2:
-                st.markdown("#### 📊 予約サマリー")
-                schedule_times: List[datetime] = []
-                for line in schedule_input.strip().split('\n'):
-                    s = line.strip()
-                    if not s:
-                        continue
+                
+                for line in lines:
                     try:
-                        dt = datetime.strptime(s, '%Y/%m/%d %H:%M')
-                        if dt > datetime.now():
-                            schedule_times.append(dt)
-                    except Exception:
-                        pass
+                        if ':' in line and len(line) <= 5:  # HH:MM形式
+                            time_obj = datetime.strptime(line, '%H:%M')
+                            schedule_dt = now.replace(
+                                hour=time_obj.hour, 
+                                minute=time_obj.minute, 
+                                second=0, 
+                                microsecond=0
+                            )
+                            if schedule_dt > now:
+                                schedule_times.append(schedule_dt)
+                    except ValueError:
+                        st.error(f"無効な時刻形式: {line}")
+                
                 if schedule_times:
-                    st.success(f"✅ {len(schedule_times)}回の投稿を予約予定")
-                    for dt in schedule_times[:5]:
-                        st.write(f"• {dt.strftime('%m/%d %H:%M')}")
-                    if len(schedule_times) > 5:
-                        st.write(f"... 他 {len(schedule_times)-5}件")
-                else:
-                    st.warning("有効な予約時刻がありません")
-                selected_count = len(edited_df[edited_df['選択'] == True]) if '選択' in edited_df.columns else 0
-                st.info(f"選択行数: {selected_count}")
-                if selected_count > 0 and schedule_times:
-                    st.metric("総投稿数", selected_count * len(schedule_times) * posts_per_time)
-
-            if st.button("🚀 予約時刻をK列に記録（投稿は実行時）", type="primary", use_container_width=True):
-                selected_rows = edited_df[edited_df['選択'] == True] if '選択' in edited_df.columns else pd.DataFrame()
-                if len(selected_rows) == 0:
-                    st.error("投稿する行を選択してください")
-                elif not schedule_times:
-                    st.error("有効な予約時刻を入力してください")
-                else:
-                    progress = st.progress(0)
-                    total = len(selected_rows)
-                    done = 0
-                    for idx, row in selected_rows.iterrows():
-                        row_num = idx + 2  # シート上の行番号（1始まり）
-                        add_schedule_to_sheet(project_info['worksheet'], row_num, schedule_times)
-                        done += 1
-                        progress.progress(done / total)
-                    st.success("K列以降に予約時刻を記録しました。ステータスは変更しません（実行時のみ更新）。")
-
-    # ダッシュボード
-    with tabs[1]:
-        st.markdown("### 📊 ダッシュボード")
-        df = load_sheet_data(project_info['worksheet'])
-        if df.empty:
-            st.info("データがありません")
+                    st.success(f"📅 予約時刻 {len(schedule_times)}件を設定")
+                    for dt in schedule_times:
+                        st.write(f"• {dt.strftime('%H:%M')}")
+    else:
+        # WordPress予約投稿
+        st.markdown("""
+        <div class="success-box">
+        <strong>✅ WordPressプロジェクト</strong><br>
+        WordPressの予約投稿機能を使用します。<br>
+        投稿後、WordPress側で指定時刻に自動公開されます。
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 予約投稿オプション
+        enable_schedule = st.checkbox("予約投稿を使用する")
+        
+        schedule_dt = None
+        if enable_schedule:
+            col_date, col_time = st.columns(2)
+            with col_date:
+                schedule_date = st.date_input("予約日")
+            with col_time:
+                schedule_time = st.time_input("予約時刻")
+            
+            schedule_dt = datetime.combine(schedule_date, schedule_time)
+            
+            if schedule_dt <= datetime.now():
+                st.warning("⚠️ 予約時刻は現在時刻より後にしてください")
+                schedule_dt = None
+            else:
+                st.success(f"📅 予約設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
+    
+    # 投稿ボタン
+    col_a, col_b = st.columns(2)
+    
+    with col_a:
+        if config['needs_k_column'] and enable_schedule:
+            button_text = "📅 K列に予約時刻を記録"
+        elif not config['needs_k_column'] and enable_schedule:
+            button_text = "📤 予約投稿"
         else:
-            status_col = 'ステータス' if 'ステータス' in df.columns else (df.columns[4] if len(df.columns) > 4 else None)
-            total_urls = len(df)
-            if status_col:
-                completed = len(df[df[status_col] == '処理済み'])
-                processing = total_urls - completed
+            button_text = "📤 即時投稿"
+        
+        if st.button(button_text, type="primary", use_container_width=True):
+            selected_rows = edited_df[edited_df['選択'] == True]
+            
+            if len(selected_rows) == 0:
+                st.error("投稿する行を選択してください")
+            elif len(selected_rows) > 1:
+                st.error("1行のみ選択してください")
             else:
-                completed = 0
-                processing = total_urls
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("総URL数", total_urls)
-            with c2:
-                st.metric("処理済み", completed)
-            with c3:
-                st.metric("未完了", processing)
-
-            st.markdown("#### 予約（K列以降）の状況（先頭5列のみ表示）")
-            # K列(=11)以降の推定列名（データエディタで自動付与された場合に “列xx”）
-            extra_cols = [c for c in df.columns if re.match(r'^列\d+$', c) and int(c.replace('列', '')) >= 11]
-            show_cols = ['宣伝URL'] + ([status_col] if status_col else []) + extra_cols[:5]
-            show_cols = [c for c in show_cols if c in df.columns]
-            if show_cols:
-                st.dataframe(df[show_cols], use_container_width=True)
-            else:
-                st.info("K列以降の表示対象列が見つかりませんでした。")
-
-    # 設定
-    with tabs[2]:
-        st.markdown("### ⚙️ 設定 / GitHub Actions")
-        st.code("""
+                row = selected_rows.iloc[0]
+                
+                if config['needs_k_column'] and enable_schedule:
+                    # K列に予約時刻を記録
+                    if not schedule_times:
+                        st.error("予約時刻を入力してください")
+                    else:
+                        success = add_schedule_to_k_column(project_key, row.to_dict(), schedule_times)
+                        if success:
+                            st.success("✅ K列に予約時刻を記録しました。GitHub Actionsで実行されます。")
+                            time.sleep(2)
+                            st.cache_data.clear()
+                            st.rerun()
+                else:
+                    # 投稿実行
+                    if not config['needs_k_column']:
+                        # WordPress予約投稿
+                        success = execute_post(row.to_dict(), project_key, schedule_dt)
+                    else:
+                        # 即時投稿
+                        success = execute_post(row.to_dict(), project_key)
+                    
+                    if success:
+                        time.sleep(2)
+                        st.cache_data.clear()
+                        st.rerun()
+    
+    with col_b:
+        if st.button("🔄 データ更新", use_container_width=True):
+            st.cache_data.clear()
+            st.success("データを更新しました")
+            st.rerun()
+    
+    # GitHub Actions情報（非WordPressプロジェクトのみ）
+    if config['needs_k_column']:
+        with st.expander("ℹ️ GitHub Actions設定"):
+            st.code("""
 # .github/workflows/auto_post.yml
 name: Auto Blog Post
 
@@ -932,18 +1006,38 @@ jobs:
       - name: Run scheduled posts
         env:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          # WP/Livedoor/Seesaa/FC2/認証 等も secrets に
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
-        run: |
-          python - <<'PY'
-from streamlit_app import check_and_execute_scheduled_posts
-print(check_and_execute_scheduled_posts())
-PY
-""", language="yaml")
-        st.info("※ 予約はK列に記録するだけ。実際の投稿は上記ワークフローで実行時刻に合わせて行います。")
+          # 各プラットフォームの認証情報も追加
+        run: python check_scheduled_posts.py
+            """, language="yaml")
+    
+    # 説明
+    with st.expander("ℹ️ 使い方"):
+        st.markdown(f"""
+        **プロジェクト: {config['worksheet']}**
+        
+        **投稿ロジック：**
+        - 1-{get_max_posts_for_project(project_key)-1}記事目：その他リンク先を使用
+        - {get_max_posts_for_project(project_key)}記事目：宣伝URLを使用（I列に日時記録）
+        - {get_max_posts_for_project(project_key)}記事目完了時のみ「処理済み」ステータスに変更
+        
+        **予約投稿について：**
+        {'- K列に予約時刻を記録し、GitHub Actionsで定期実行' if config['needs_k_column'] else '- WordPressの予約投稿機能を使用'}
+        """)
+    
+    # 情報表示
+    st.markdown("---")
+    col_info1, col_info2, col_info3 = st.columns(3)
+    
+    with col_info1:
+        st.metric("未処理件数", len(df))
+    
+    with col_info2:
+        st.metric("プラットフォーム", len(config['platforms']))
+    
+    with col_info3:
+        last_update = datetime.now().strftime("%H:%M:%S")
+        st.metric("最終更新", last_update)
 
-# ========================
-# エントリーポイント
-# ========================
 if __name__ == "__main__":
     main()
