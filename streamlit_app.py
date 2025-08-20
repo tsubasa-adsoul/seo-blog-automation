@@ -582,6 +582,14 @@ def load_sheet_data(project_key):
         headers = rows[0]
         data_rows = rows[1:]
         
+        # 列名の重複を除去
+        clean_headers = []
+        for i, header in enumerate(headers):
+            if header in clean_headers:
+                clean_headers.append(f"{header}_{i}")
+            else:
+                clean_headers.append(header)
+        
         # 未処理のみフィルタ
         filtered_rows = []
         for row in data_rows:
@@ -589,14 +597,17 @@ def load_sheet_data(project_key):
                 status = row[4].strip().lower() if len(row) > 4 else ''
                 if status in ['', '未処理']:
                     # 行を適切な長さに調整
-                    adjusted_row = row + [''] * (len(headers) - len(row))
-                    filtered_rows.append(adjusted_row[:len(headers)])
+                    adjusted_row = row + [''] * (len(clean_headers) - len(row))
+                    filtered_rows.append(adjusted_row[:len(clean_headers)])
         
         if not filtered_rows:
             return pd.DataFrame()
         
-        df = pd.DataFrame(filtered_rows, columns=headers)
-        df['選択'] = False
+        df = pd.DataFrame(filtered_rows, columns=clean_headers)
+        
+        # 「選択」列が存在しない場合のみ追加
+        if '選択' not in df.columns:
+            df.insert(0, '選択', False)
         
         return df
         
