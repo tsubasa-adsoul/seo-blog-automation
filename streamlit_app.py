@@ -104,7 +104,7 @@ WP_CONFIGS = {
         'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
     },
     'kosagi': {
-        'url': 'https://www.kosagi.biz/',
+        'url': 'https://www.kosagi.jp/',
         'user': 'kosagi',
         'password': 'VsGS VU5J cKx8 HM6p oLEb VdNH'
     },
@@ -201,46 +201,19 @@ st.markdown("""
 # ========================
 # セッションステート初期化
 # ========================
-def init_session_state():
-    """セッションステートの初期化"""
-    if 'posting_projects' not in st.session_state:
-        st.session_state.posting_projects = set()
-    if 'realtime_logs' not in st.session_state:
-        st.session_state.realtime_logs = []
+if 'gemini_key_index' not in st.session_state:
+    st.session_state.gemini_key_index = 0
 
-def add_realtime_log(message):
-    """リアルタイムログを追加"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    log_message = f"[{timestamp}] {message}"
-    st.session_state.realtime_logs.append(log_message)
-    # ログが多すぎる場合は古いものを削除
-    if len(st.session_state.realtime_logs) > 10:
-        st.session_state.realtime_logs.pop(0)
+# 投稿処理中フラグ（プロジェクト別）
+if 'posting_projects' not in st.session_state:
+    st.session_state.posting_projects = set()
 
-# ========================
-# メイン関数
-# ========================
-def main():
-    st.title("SEOブログ自動化ツール")
-    st.write("記事を自動生成して複数のプラットフォームに投稿します")
-    
-    # プロジェクト選択（全6プロジェクト対応）
-    project_options = {
-        'biggift': 'ビックギフト（非WordPress・K列予約）',
-        'arigataya': 'ありがた屋（非WordPress・K列予約）',
-        'kaitori_life': '買取LIFE（WordPress・予約投稿）',
-        'osaifu_rescue': 'お財布レスキュー（WordPress・予約投稿）',
-        'kure_kaeru': 'クレかえる（WordPress・予約投稿）',
-        'red_site': '赤いサイト（WordPress・kosagi特殊）'
-    }
-    
-    project_key = st.selectbox(
-        "プロジェクト選択:",
-        options=list(project_options.keys()),
-        format_func=lambda x: project_options[x],
-        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,
-        key="project_selector"
-    )
+if 'current_project' not in st.session_state:
+    st.session_state.current_project = None
+
+# リアルタイムログ用
+if 'realtime_logs' not in st.session_state:
+    st.session_state.realtime_logs = []
 
 # ========================
 # 認証 & シート取得
@@ -360,6 +333,26 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
             {'bg': '#E91E63', 'accent': '#F48FB1', 'text': '#FFFFFF'},  # ピンク×薄ピンク
             {'bg': '#C2185B', 'accent': '#F8BBD9', 'text': '#FFFFFF'},  # 深ピンク×ライトピンク
         ],
+        'efdlqjtz': [
+            {'bg': '#FF5722', 'accent': '#FF8A65', 'text': '#FFFFFF'},  # オレンジ×薄オレンジ
+            {'bg': '#D84315', 'accent': '#FFAB91', 'text': '#FFFFFF'},  # 深オレンジ×ライトオレンジ
+        ],
+        'ncepqvub': [
+            {'bg': '#B71C1C', 'accent': '#EF5350', 'text': '#FFFFFF'},  # 赤×薄赤
+            {'bg': '#C62828', 'accent': '#E57373', 'text': '#FFFFFF'},  # 深赤×ライトレッド
+        ],
+        'kosagi': [
+            {'bg': '#B71C1C', 'accent': '#EF5350', 'text': '#FFFFFF'},  # 赤×薄赤
+            {'bg': '#C62828', 'accent': '#E57373', 'text': '#FFFFFF'},  # 深赤×ライトレッド
+        ],
+        'selectad': [
+            {'bg': '#4A148C', 'accent': '#AB47BC', 'text': '#FFFFFF'},  # 紫×薄紫
+            {'bg': '#6A1B9A', 'accent': '#CE93D8', 'text': '#FFFFFF'},  # 深紫×ライトパープル
+        ],
+        'thrones': [
+            {'bg': '#004D40', 'accent': '#26A69A', 'text': '#FFFFFF'},  # ティール×薄ティール
+            {'bg': '#00695C', 'accent': '#4DB6AC', 'text': '#FFFFFF'},  # 深ティール×ライトティール
+        ],
         'default': [
             {'bg': '#4CAF50', 'accent': '#8BC34A', 'text': '#FFFFFF'},  # デフォルトグリーン
             {'bg': '#689F38', 'accent': '#AED581', 'text': '#FFFFFF'},  # オリーブグリーン
@@ -441,8 +434,8 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
         'welkenraedt': 'マネーハック365',
         'ykikaku': 'お財布レスキュー',
         'efdlqjtz': 'キャッシュアドバイザー',
-        'ncepqvub': 'マネーサポート',
-        'kosagi': 'ファイナンシャルガイド',
+        'ncepqvub': 'あと払いスマートライフ',
+        'kosagi': '金欠ブロガーの裏金策帖',
         'selectad': '買取LIFEサポート',
         'thrones': 'アセットマネジメント'
     }
@@ -552,6 +545,7 @@ def generate_slug_from_title(title):
     slug = '-'.join(slug_parts) + f'-{date_str}-{random_num}'
     
     return slug.lower()
+
 def _get_gemini_key():
     key = GEMINI_API_KEYS[st.session_state.gemini_key_index % len(GEMINI_API_KEYS)]
     st.session_state.gemini_key_index += 1
@@ -1316,24 +1310,24 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
 # UI構築
 # ========================
 def main():
-    # セッションステートの初期化
-    init_session_state()
-    
     st.title("SEOブログ自動化ツール")
     st.write("記事を自動生成して複数のプラットフォームに投稿します")
     
-    # プロジェクト選択
+    # プロジェクト選択（全6プロジェクト対応）
     project_options = {
-        'biggift': 'ビックギフト（WordPress・予約投稿）',
-        'arigataya': 'ありがた屋（非WordPress・K列予約）', 
-        'redsite': '赤いサイト（WordPress・kosagi特殊）'
+        'biggift': 'ビックギフト（非WordPress・K列予約）',
+        'arigataya': 'ありがた屋（非WordPress・K列予約）',
+        'kaitori_life': '買取LIFE（WordPress・予約投稿）',
+        'osaifu_rescue': 'お財布レスキュー（WordPress・予約投稿）',
+        'kure_kaeru': 'クレかえる（WordPress・予約投稿）',
+        'red_site': '赤いサイト（WordPress・kosagi特殊）'
     }
     
     project_key = st.selectbox(
         "プロジェクト選択:",
         options=list(project_options.keys()),
         format_func=lambda x: project_options[x],
-        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
+        disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,
         key="project_selector"
     )
     
@@ -1350,7 +1344,7 @@ def main():
                         st.text(log)
     
     # プロジェクト変更検知
-    if st.session_state.current_project != project_key and project_key not in st.session_state.posting_projects:
+    if st.session_state.get('current_project') != project_key and project_key not in st.session_state.posting_projects:
         st.session_state.current_project = project_key
         st.cache_data.clear()  # プロジェクト変更時にキャッシュクリア
     
@@ -1643,7 +1637,3 @@ jobs:
 
 if __name__ == "__main__":
     main()
-
-
-
-
