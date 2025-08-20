@@ -1121,7 +1121,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
     try:
         # 投稿開始時にプロジェクトを投稿中リストに追加
         st.session_state.posting_projects.add(project_key)
-        st.session_state.realtime_logs = []  # ログリセット
+        # ログリセットを削除（ログを保持）
         
         add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始")
         
