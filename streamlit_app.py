@@ -436,16 +436,19 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
         return ""
 
 def post_to_blogger(article: dict) -> str:
-    """Blogger投稿（EXE版から完全移植）"""
-    config = PLATFORM_CONFIGS['blogger']
-    BLOG_ID = config['blog_id']
+    """Blogger投稿（完全実装）"""
+    if not BLOGGER_AVAILABLE:
+        st.error("Blogger投稿に必要なライブラリがインストールされていません")
+        return ""
+    
+    BLOG_ID = os.environ.get('BLOGGER_BLOG_ID', '3943718248369040188')
     SCOPES = ['https://www.googleapis.com/auth/blogger']
     
     try:
-        logger.info("📤 Blogger認証処理開始...")
+        st.info("📤 Blogger認証処理開始...")
         
         creds = None
-        token_file = config['token_file']
+        token_file = '/tmp/blogger_token.pickle'
         
         # 既存のトークンファイルを読み込み
         if os.path.exists(token_file):
@@ -455,16 +458,48 @@ def post_to_blogger(article: dict) -> str:
         # 認証情報の検証・更新
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                logger.info("🔄 Bloggerトークンを更新中...")
+                st.info("🔄 Bloggerトークンを更新中...")
                 creds.refresh(Request())
             else:
-                logger.info("🆕 Blogger初回認証を実行...")
-                
-                # 環境変数からクライアントシークレットを取得
-                client_secrets_json = config['client_secrets']
-                if not client_secrets_json:
-                    logger.error("❌ BLOGGER_CLIENT_SECRETS_JSON環境変数が設定されていません")
-                    return ""
+                st.error("🆕 Blogger初回認証が必要です。GitHub Actions環境では自動認証できません。")
+                return ""
+            
+            # トークンを保存
+            with open(token_file, 'wb') as token:
+                pickle.dump(creds, token)
+        
+        st.success("✅ Blogger認証成功")
+        
+        # Blogger APIサービスを構築
+        service = build('blogger', 'v3', credentials=creds)
+        
+        # 投稿データを作成
+        post_data = {
+            'title': article['title'],
+            'content': article['content'],
+            'labels': [article.get('theme', '金融')]
+        }
+        
+        st.info(f"📝 Blogger投稿実行: {article['title']}")
+        
+        # 投稿を実行
+        response = service.posts().insert(
+            blogId=BLOG_ID,
+            body=post_data,
+            isDraft=False
+        ).execute()
+        
+        if response and 'url' in response:
+            post_url = response['url']
+            st.success(f"✅ Blogger投稿成功: {post_url}")
+            return post_url
+        else:
+            st.error("❌ Blogger投稿失敗: レスポンスにURLが含まれていません")
+            return ""
+            
+    except Exception as e:
+        st.error(f"❌ Blogger投稿エラー: {e}")
+        return ""
                 
                 # 一時ファイルにクライアントシークレットを保存
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -809,4 +844,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
