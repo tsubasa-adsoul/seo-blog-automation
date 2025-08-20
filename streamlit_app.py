@@ -111,7 +111,7 @@ WP_CONFIGS = {
     'ncepqvub': {
         'url': 'https://ncepqvub.v2009.coreserver.jp/',  # ← 修正
         'user': 'ncepqvub',
-        'password': 'ZNdJ IGoK Wdj3 mNz4 Xevp KGFj'
+        'password': 'DIZy ky10 UAhO NJ47 6Jww ImdE'
     },
     'kosagi': {
         'url': 'https://www.kosagi.biz/',
@@ -1830,5 +1830,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
