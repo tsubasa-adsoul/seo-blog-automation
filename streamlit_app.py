@@ -324,6 +324,7 @@ def get_sheets_client():
     st.stop()
 
 @st.cache_data(ttl=60)
+
 def load_sheet_data(project_key):
     try:
         if project_key not in PROJECT_CONFIGS:
@@ -334,13 +335,42 @@ def load_sheet_data(project_key):
         rows = sheet.get_all_values()
         if len(rows) <= 1:
             return pd.DataFrame()
+        
         headers = rows[0]
         data_rows = rows[1:]
 
-        # ヘッダ重複回避
+        # ヘッダーの正規化（改行・括弧・特殊文字除去）
         clean_headers = []
         for i, header in enumerate(headers):
-            clean_headers.append(f"{header}_{i}" if header in clean_headers else header)
+            # 改行、括弧、余分な空白を除去
+            clean_header = header.replace('\n', '').replace('\r', '').replace('（', '').replace('）', '').replace('(', '').replace(')', '').strip()
+            
+            # 主要なヘッダーを統一
+            if 'テーマ' in header:
+                clean_header = 'テーマ'
+            elif '宣伝URL' in header or 'URL' in header:
+                clean_header = '宣伝URL'
+            elif '投稿先' in header:
+                clean_header = '投稿先'
+            elif 'アンカー' in header:
+                clean_header = 'アンカーテキスト'
+            elif 'ステータス' in header:
+                clean_header = 'ステータス'
+            elif '投稿URL' in header:
+                clean_header = '投稿URL'
+            elif 'カウンター' in header:
+                clean_header = 'カウンター'
+            elif 'カテゴリー' in header:
+                clean_header = 'カテゴリー'
+            elif 'パーマリンク' in header:
+                clean_header = 'パーマリンク'
+            elif '日付' in header:
+                clean_header = '日付'
+            
+            # 重複回避
+            if clean_header in clean_headers:
+                clean_header = f"{clean_header}_{i}"
+            clean_headers.append(clean_header)
 
         # ステータス 未処理 のみ
         filtered_rows = []
@@ -362,56 +392,217 @@ def load_sheet_data(project_key):
         add_notification(f"データ読み込みエラー: {e}", "error")
         return pd.DataFrame()
 
-def update_sheet_row(project_key, row_data, updates):
-    try:
-        client = get_sheets_client()
-        config = PROJECT_CONFIGS[project_key]
-        sheet = client.open_by_key(SHEET_ID).worksheet(config['worksheet'])
-        all_rows = sheet.get_all_values()
-        promo_url = row_data.get('宣伝URL', '')
-        for i, row in enumerate(all_rows[1:], start=2):
-            if len(row) > 1 and row[1] == promo_url:
-                for col_name, value in updates.items():
-                    if col_name in all_rows[0]:
-                        col_idx = all_rows[0].index(col_name) + 1
-                        sheet.update_cell(i, col_idx, value)
-                        time.sleep(0.3)
-                add_realtime_log(f"✅ スプレッドシート更新: 行{i}", project_key)
-                add_notification(f"スプレッドシート更新完了: 行{i}", "success", project_key)
-                return True
-        add_notification("対象行が見つかりません", "error", project_key)
-        return False
-    except Exception as e:
-        add_notification(f"スプレッドシート更新エラー: {e}", "error", project_key)
-        return False
 
-def add_schedule_to_k_column(project_key, row_data, schedule_times):
+def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
     try:
-        client = get_sheets_client()
+        st.session_state.posting_projects.add(project_key)
+        if project_key not in st.session_state.realtime_logs:
+            st.session_state.realtime_logs[project_key] = []
+        if project_key not in st.session_state.all_posted_urls:
+            st.session_state.all_posted_urls[project_key] = []
+
+        add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始", project_key)
+        add_notification(f"{PROJECT_CONFIGS[project_key]['worksheet']} の投稿を開始しました", "info", project_key)
+
         config = PROJECT_CONFIGS[project_key]
-        sheet = client.open_by_key(SHEET_ID).worksheet(config['worksheet'])
-        all_rows = sheet.get_all_values()
-        promo_url = row_data.get('宣伝URL', '')
-        for i, row in enumerate(all_rows[1:], start=2):
-            if len(row) > 1 and row[1] == promo_url:
-                col_num = 11  # K列
-                for schedule_dt in schedule_times:
-                    while True:
-                        try:
-                            val = sheet.cell(i, col_num).value
-                            if not val:
-                                break
-                        except Exception:
+        schedule_times = schedule_times or []
+
+        # カウンター取得（複数パターン対応）
+        current_counter = 0
+        counter_value = row_data.get('カウンター', '') or row_data.get('カウンタ', '') or ''
+        if counter_value:
+            try:
+                current_counter = int(str(counter_value).strip())
+            except:
+                current_counter = 0
+        add_realtime_log(f"📊 現在のカウンター: {current_counter}", project_key)
+
+        # 投稿先取得（複数パターン対応）
+        post_target_raw = row_data.get('投稿先', '') or ''
+        post_target = post_target_raw.strip().lower()
+        
+        # デバッグ情報
+        add_notification(f"投稿先指定: '{post_target_raw}'", "info", project_key)
+        add_realtime_log(f"📍 投稿先: '{post_target_raw}' -> '{post_target}'", project_key)
+
+        # 最大投稿数
+        max_posts = get_max_posts_for_project(project_key, post_target)
+
+        if current_counter >= max_posts:
+            add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み", project_key)
+            add_notification(f"既に{max_posts}記事完了しています", "warning", project_key)
+            st.session_state.posting_projects.discard(project_key)
+            return False
+
+        posts_completed = 0
+        add_realtime_log(f"🚀 {post_count}記事の投稿を開始", project_key)
+        progress_bar = st.progress(0)
+
+        for i in range(post_count):
+            if current_counter >= max_posts:
+                add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了済み", project_key)
+                add_notification(f"カウンター{current_counter}: 既に{max_posts}記事完了済み", "warning", project_key)
+                break
+
+            schedule_dt = schedule_times[i] if i < len(schedule_times) else None
+            add_realtime_log(f"📝 記事{i+1}/{post_count}の処理開始", project_key)
+
+            with st.expander(f"記事{i+1}/{post_count}の投稿", expanded=True):
+                try:
+                    # 宣伝URL or その他リンク
+                    if current_counter == max_posts - 1:
+                        add_realtime_log(f"🎯 {max_posts}記事目 → 宣伝URL使用", project_key)
+                        st.info(f"{max_posts}記事目 → 宣伝URL使用")
+                        url = row_data.get('宣伝URL', '') or ''
+                        anchor = row_data.get('アンカーテキスト', '') or row_data.get('アンカー', '') or project_key
+                        category = row_data.get('カテゴリー', '') or 'お金のマメ知識'
+                    else:
+                        add_realtime_log(f"🔗 {current_counter + 1}記事目 → その他リンク使用", project_key)
+                        st.info(f"{current_counter + 1}記事目 → その他リンク使用")
+                        url, anchor = get_other_link()
+                        if not url:
+                            add_realtime_log("❌ その他リンクが取得できません", project_key)
+                            add_notification("その他リンクが取得できません", "error", project_key)
                             break
-                        col_num += 1
-                    sheet.update_cell(i, col_num, schedule_dt.strftime('%Y/%m/%d %H:%M'))
-                    col_num += 1
-                add_notification(f"K列以降に予約時刻を記録: 行{i}", "success", project_key)
-                return True
-        add_notification("対象行が見つかりません", "error", project_key)
-        return False
+                        category = row_data.get('カテゴリー', '') or 'お金のマメ知識'
+
+                    # 記事生成
+                    add_realtime_log("🧠 記事を生成中...", project_key)
+                    with st.spinner("記事を生成中..."):
+                        theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
+                        article = generate_article_with_link(theme, url, anchor)
+
+                    add_realtime_log(f"✅ 記事生成完了: {article['title'][:30]}...", project_key)
+                    st.success(f"タイトル: {article['title']}")
+                    st.info(f"使用リンク: {anchor}")
+
+                    # === 投稿先の厳密ルーティング ===
+                    posted_urls = []
+                    allowed = config['platforms']
+
+                    # WordPress群の場合
+                    if 'wordpress' in allowed:
+                        wp_sites = config.get('wp_sites', [])
+                        
+                        # 投稿先が空白の場合はエラー
+                        if not post_target:
+                            add_notification("投稿先が空白です。投稿先サイトを指定してください", "error", project_key)
+                            add_realtime_log("❌ 投稿先が空白", project_key)
+                            break
+                        
+                        # 指定されたサイトがプロジェクトに登録されているかチェック
+                        if post_target in wp_sites:
+                            add_realtime_log(f"📤 WordPress({post_target})に投稿", project_key)
+                            add_notification(f"WordPress '{post_target}' に投稿します", "info", project_key)
+                            post_url = post_to_wordpress(article, post_target, category, schedule_dt, enable_eyecatch, project_key)
+                            if post_url:
+                                posted_urls.append(post_url)
+                        else:
+                            add_notification(f"投稿先 '{post_target}' はこのプロジェクト({project_key})に登録されていません。利用可能: {', '.join(wp_sites)}", "error", project_key)
+                            add_realtime_log(f"❌ 未登録の投稿先: {post_target}", project_key)
+                            break
+
+                    # 非WordPressプラットフォーム
+                    elif post_target in allowed:
+                        if post_target == 'blogger':
+                            add_realtime_log("📤 Bloggerに投稿中...", project_key)
+                            post_url = post_to_blogger(article, project_key)
+                            if post_url: posted_urls.append(post_url)
+                        elif post_target == 'livedoor':
+                            add_realtime_log("📤 livedoorに投稿中...", project_key)
+                            post_url = post_to_livedoor(article, category, project_key)
+                            if post_url: posted_urls.append(post_url)
+                        elif post_target == 'seesaa':
+                            add_realtime_log("📤 Seesaaに投稿中...", project_key)
+                            post_url = post_to_seesaa(article, category, project_key)
+                            if post_url: posted_urls.append(post_url)
+                        elif post_target == 'fc2':
+                            add_realtime_log("📤 FC2に投稿中...", project_key)
+                            post_url = post_to_fc2(article, category, project_key)
+                            if post_url: posted_urls.append(post_url)
+                        else:
+                            add_notification(f"未対応の投稿先: {post_target}", "error", project_key)
+                            break
+                    else:
+                        add_notification(f"投稿先 '{post_target}' は未対応または空白です。利用可能: {', '.join(allowed)}", "error", project_key)
+                        add_realtime_log(f"❌ 未対応の投稿先: {post_target}", project_key)
+                        break
+
+                    if not posted_urls:
+                        add_realtime_log("❌ 投稿に失敗しました", project_key)
+                        add_notification("投稿に失敗しました", "error", project_key)
+                        break
+
+                    # 記録
+                    timestamp = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+                    for url_item in posted_urls:
+                        add_posted_url(current_counter + 1, article['title'], url_item, timestamp, project_key)
+                        add_realtime_log(f"📋 記事{current_counter + 1}記録 → {url_item}", project_key)
+
+                    # カウンター更新
+                    current_counter += 1
+                    posts_completed += 1
+
+                    # スプレッドシート更新
+                    client = get_sheets_client()
+                    config_sheet = PROJECT_CONFIGS[project_key]
+                    sheet = client.open_by_key(SHEET_ID).worksheet(config_sheet['worksheet'])
+                    all_rows = sheet.get_all_values()
+                    promo_url = row_data.get('宣伝URL', '') or ''
+                    
+                    for row_idx, row in enumerate(all_rows[1:], start=2):
+                        if len(row) > 1 and row[1] == promo_url:
+                            # G列: カウンター
+                            sheet.update_cell(row_idx, 7, str(current_counter))
+                            time.sleep(0.3)
+                            if current_counter >= max_posts:
+                                # E列: ステータス
+                                sheet.update_cell(row_idx, 5, "処理済み"); time.sleep(0.3)
+                                # F列: 投稿URL
+                                final_urls = [it['url'] for it in st.session_state.all_posted_urls[project_key] if it['counter'] == max_posts]
+                                sheet.update_cell(row_idx, 6, ', '.join(final_urls)); time.sleep(0.3)
+                                # I列: 完了日時
+                                completion_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+                                sheet.update_cell(row_idx, 9, completion_time); time.sleep(0.3)
+                                add_realtime_log(f"🎉 {max_posts}記事完了！シート更新完了", project_key)
+                                add_notification(f"{max_posts}記事完了！プロジェクト完了", "success", project_key)
+                                st.session_state.completion_results[project_key] = {
+                                    'project_name': PROJECT_CONFIGS[project_key]['worksheet'],
+                                    'completed_at': completion_time,
+                                    'total_posts': max_posts,
+                                    'all_urls': st.session_state.all_posted_urls[project_key].copy()
+                                }
+                                st.balloons()
+                                st.success(f"{max_posts}記事完了!")
+                                st.session_state.posting_projects.discard(project_key)
+                                return True
+                            else:
+                                add_notification(f"カウンター更新: {current_counter}/{max_posts}", "success", project_key)
+                            break
+
+                    progress_bar.progress(posts_completed / post_count)
+
+                    if current_counter < max_posts and i < post_count - 1:
+                        wait_time = random.randint(MIN_INTERVAL, MAX_INTERVAL)
+                        add_realtime_log(f"⏳ 次の記事まで{wait_time}秒待機中...", project_key)
+                        st.info(f"次の記事まで{wait_time}秒待機中...")
+                        time.sleep(wait_time)
+
+                except Exception as e:
+                    add_realtime_log(f"❌ 記事{i+1}の投稿エラー: {e}", project_key)
+                    add_notification(f"記事{i+1}の投稿エラー: {e}", "error", project_key)
+                    st.session_state.posting_projects.discard(project_key)
+                    break
+
+        st.session_state.posting_projects.discard(project_key)
+        add_realtime_log(f"✅ {posts_completed}記事の投稿が完了しました", project_key)
+        add_notification(f"{posts_completed}記事の投稿が完了しました", "success", project_key)
+        return True
+
     except Exception as e:
-        add_notification(f"K列記録エラー: {e}", "error", project_key)
+        st.session_state.posting_projects.discard(project_key)
+        add_realtime_log(f"❌ 投稿処理エラー: {e}", project_key)
+        add_notification(f"投稿処理エラー: {e}", "error", project_key)
         return False
 
 # ========================
