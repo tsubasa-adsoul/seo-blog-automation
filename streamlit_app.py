@@ -33,105 +33,114 @@ except Exception:
 try:
     SHEET_ID = st.secrets["google"]["spreadsheet_id"]
     GEMINI_API_KEYS = [
-        st.secrets["google"]["gemini_api_key_1"],
-        st.secrets["google"]["gemini_api_key_2"],
+        st.secrets["google"].get("gemini_api_key_1"),
+        st.secrets["google"].get("gemini_api_key_2"),
     ]
+    GEMINI_API_KEYS = [k for k in GEMINI_API_KEYS if k]
 except KeyError as e:
     st.error(f"Secretsの設定が不足しています: {e}")
     st.stop()
 
-# プロジェクト設定（完全版）
+# --- WP 接続設定は Secrets から読む（あれば優先） ---
+# .streamlit/secrets.toml に [wp_configs] セクションを置いた場合はこちらを使う
+WP_CONFIGS = {}
+if "wp_configs" in st.secrets:
+    # 例: st.secrets["wp_configs"]["ykikaku"]["url"]
+    WP_CONFIGS = {k: dict(v) for k, v in st.secrets["wp_configs"].items()}
+
+# フォールバック（Secrets 未設定時のみ）
+if not WP_CONFIGS:
+    WP_CONFIGS = {
+        'ykikaku': {
+            'url': 'https://ykikaku.xsrv.jp/',
+            'user': 'ykikaku',
+            'password': 'lfXp BJNx Rvy8 rBlt Yjug ADRn'
+        },
+        'efdlqjtz': {
+            'url': 'https://www.efdlqjtz.v2010.coreserver.jp/',
+            'user': 'efdlqjtz',
+            'password': 'KCIA cTyz TcdG U1Qs M4pd eezb'
+        },
+        'selectadvance': {
+            'url': 'https://selectadvance.v2006.coreserver.jp/',
+            'user': 'selectadvance',
+            'password': '6HUY g7oZ Gow8 LBCu yzL8 cR3S'
+        },
+        'welkenraedt': {
+            'url': 'https://www.welkenraedt-online.com/',
+            'user': 'welkenraedtonline',
+            'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
+        },
+        'ncepqvub': {
+            'url': 'https://ncepqvub.v2009.coreserver.jp/',
+            'user': 'ncepqvub',
+            'password': 'DIZy ky10 UAhO NJ47 6Jww ImdE'
+        },
+        'kosagi': {
+            'url': 'https://www.kosagi.jp/',
+            'user': 'kosagi',
+            'password': 'K2DZ ERIy aTLb K2Z0 gHi6 XdIN'
+        },
+        'selectad': {
+            'url': 'https://selectad01.xsrv.jp/',
+            'user': 'selectad01',
+            'password': '8LhM laXm pDUx gkjV cg1f EXYr'
+        },
+        'thrones': {
+            'url': 'https://thrones.v2009.coreserver.jp/',
+            'user': 'thrones',
+            'password': 'ETvJ VP2F jugd mxXU xJX0 wHVr'
+        }
+    }
+
+# プロジェクト設定（あなたのレイアウト／命名を尊重）
 PROJECT_CONFIGS = {
     'biggift': {
         'worksheet': 'ビックギフト向け',
         'platforms': ['blogger', 'livedoor'],
         'max_posts': {'blogger': 20, 'livedoor': 15},
-        'needs_k_column': True  # 予約時刻をK列に記録（GitHub Actionsで処理）
+        'needs_k_column': True
     },
     'arigataya': {
         'worksheet': 'ありがた屋向け',
         'platforms': ['seesaa', 'fc2'],
         'max_posts': 20,
-        'needs_k_column': True  # 予約時刻をK列に記録（GitHub Actionsで処理）
+        'needs_k_column': True
     },
     'kaitori_life': {
         'worksheet': '買取LIFE向け',
         'platforms': ['wordpress'],
         'wp_sites': ['selectad', 'thrones'],
         'max_posts': 20,
-        'needs_k_column': False  # WordPressの予約機能を使用
+        'needs_k_column': False
     },
     'osaifu_rescue': {
         'worksheet': 'お財布レスキュー向け',
         'platforms': ['wordpress'],
         'wp_sites': ['ykikaku', 'efdlqjtz'],
         'max_posts': 20,
-        'needs_k_column': False  # WordPressの予約機能を使用
+        'needs_k_column': False
     },
     'kure_kaeru': {
         'worksheet': 'クレかえる向け',
         'platforms': ['wordpress'],
         'wp_sites': ['selectadvance', 'welkenraedt'],
         'max_posts': 20,
-        'needs_k_column': False  # WordPressの予約機能を使用
+        'needs_k_column': False
     },
     'red_site': {
         'worksheet': '赤いサイト向け',
         'platforms': ['wordpress'],
         'wp_sites': ['ncepqvub', 'kosagi'],
         'max_posts': 20,
-        'needs_k_column': False  # WordPressの予約機能（kosagiは特殊）
-    }
-}
-
-# ★★ 必ず提示どおりに統一（ローカルで成功した設定）★★
-WP_CONFIGS = {
-    'ykikaku': {
-        'url': 'https://ykikaku.xsrv.jp/',
-        'user': 'ykikaku',
-        'password': 'lfXp BJNx Rvy8 rBlt Yjug ADRn'
-    },
-    'efdlqjtz': {
-        'url': 'https://www.efdlqjtz.v2010.coreserver.jp/',
-        'user': 'efdlqjtz',
-        'password': 'KCIA cTyz TcdG U1Qs M4pd eezb'
-    },
-    'selectadvance': {
-        'url': 'https://selectadvance.v2006.coreserver.jp/',
-        'user': 'selectadvance',
-        'password': '6HUY g7oZ Gow8 LBCu yzL8 cR3S'
-    },
-    'welkenraedt': {
-        'url': 'https://www.welkenraedt-online.com/',
-        'user': 'welkenraedtonline',
-        'password': 'yzn4 6nlm vtrh 8N4v oxHl KUvf'
-    },
-    'ncepqvub': {
-        'url': 'https://ncepqvub.v2009.coreserver.jp/',
-        'user': 'ncepqvub',
-        'password': 'DIZy ky10 UAhO NJ47 6Jww ImdE'
-    },
-    'kosagi': {
-        'url': 'https://www.kosagi.jp/',
-        'user': 'kosagi',
-        'password': 'K2DZ ERIy aTLb K2Z0 gHi6 XdIN'
-    },
-    'selectad': {
-        'url': 'https://selectad01.xsrv.jp/',
-        'user': 'selectad01',
-        'password': '8LhM laXm pDUx gkjV cg1f EXYr'
-    },
-    'thrones': {
-        'url': 'https://thrones.v2009.coreserver.jp/',
-        'user': 'thrones',
-        'password': 'ETvJ VP2F jugd mxXU xJX0 wHVr'
+        'needs_k_column': False
     }
 }
 
 # 各プラットフォーム設定
 PLATFORM_CONFIGS = {
     'seesaa': {
-        'endpoint': "http://blog.seesaa.jp/rpc",
+        'endpoint': os.environ.get('SEESAA_ENDPOINT', 'http://blog.seesaa.jp/rpc'),
         'username': os.environ.get('SEESAA_USERNAME', 'kyuuyo.fac@gmail.com'),
         'password': os.environ.get('SEESAA_PASSWORD', 'st13131094pao'),
         'blogid': os.environ.get('SEESAA_BLOGID', '7228801')
@@ -157,7 +166,7 @@ MIN_INTERVAL = 30
 MAX_INTERVAL = 60
 
 # ========================
-# Streamlit設定
+# Streamlit設定（UIはあなたのレイアウトを踏襲）
 # ========================
 st.set_page_config(
     page_title="統合ブログ投稿ツール",
@@ -211,15 +220,10 @@ st.markdown("""
 # ========================
 if 'gemini_key_index' not in st.session_state:
     st.session_state.gemini_key_index = 0
-
-# 投稿処理中フラグ（プロジェクト別）
 if 'posting_projects' not in st.session_state:
     st.session_state.posting_projects = set()
-
 if 'current_project' not in st.session_state:
     st.session_state.current_project = None
-
-# リアルタイムログ用
 if 'realtime_logs' not in st.session_state:
     st.session_state.realtime_logs = []
 
@@ -305,10 +309,33 @@ def get_other_link():
     return None, None
 
 # ========================
-# アイキャッチ画像自動生成
+# HTMLユーティリティ（追加）
+# ========================
+def enforce_anchor_attrs(html: str) -> str:
+    """<a> に target/_blank + rel を強制付与"""
+    def add_attrs(m):
+        tag = m.group(0)
+        if re.search(r"\btarget\s*=", tag, flags=re.I) is None:
+            tag = tag.replace("<a ", '<a target="_blank" ', 1)
+        rel_m = re.search(r'\brel\s*=\s*"([^"]*)"', tag, flags=re.I)
+        if rel_m:
+            rel_val = rel_m.group(1)
+            need = []
+            for t in ("noopener", "noreferrer"):
+                if t not in rel_val.split():
+                    need.append(t)
+            if need:
+                new_rel = rel_val + " " + " ".join(need)
+                tag = tag[:rel_m.start(1)] + new_rel + tag[rel_m.end(1):]
+        else:
+            tag = tag.replace("<a ", '<a rel="noopener noreferrer" ', 1)
+        return tag
+    return re.sub(r"<a\s+[^>]*>", add_attrs, html, flags=re.I)
+
+# ========================
+# アイキャッチ画像自動生成（あなたの版を尊重）
 # ========================
 def _load_font_candidates():
-    # リポジトリ同梱フォントを最優先
     candidates = [
         "fonts/NotoSansJP-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansJP-Bold.otf",
@@ -322,7 +349,6 @@ def _load_font_candidates():
     return None
 
 def create_eyecatch_image(title: str, site_key: str) -> bytes:
-    """タイトルからアイキャッチ画像を自動生成(サイト別カラー)"""
     width, height = 600, 400
     site_color_schemes = {
         'selectadvance': [{'bg': '#2E7D32', 'accent': '#66BB6A', 'text': '#FFFFFF'},
@@ -348,18 +374,15 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
 
     img = Image.new('RGB', (width, height), color=scheme['bg'])
     draw = ImageDraw.Draw(img)
-    # グラデーション
     for i in range(height):
         alpha = i / height
         r = int(int(scheme['bg'][1:3], 16) * (1 - alpha * 0.3))
         g = int(int(scheme['bg'][3:5], 16) * (1 - alpha * 0.3))
         b = int(int(scheme['bg'][5:7], 16) * (1 - alpha * 0.3))
         draw.rectangle([(0, i), (width, i + 1)], fill=(r, g, b))
-    # 装飾
     draw.ellipse([-50, -50, 150, 150], fill=scheme['accent'])
     draw.ellipse([width-100, height-100, width+50, height+50], fill=scheme['accent'])
 
-    # フォント
     font_path = _load_font_candidates()
     try:
         title_font = ImageFont.truetype(font_path if font_path else "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
@@ -368,7 +391,6 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
         title_font = ImageFont.load_default()
         subtitle_font = ImageFont.load_default()
 
-    # タイトルの改行
     lines = []
     if len(title) > 12:
         for sep in ['！', '？', '…', '!', '?', '、', '。', '・', '｜']:
@@ -427,58 +449,17 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     bio.seek(0)
     return bio.getvalue()
 
-def upload_image_to_wordpress(image_data: bytes, filename: str, site_config: dict) -> int | None:
-    """画像をWordPressにアップロードしてIDを返す"""
-    media_endpoint = f'{site_config["url"]}wp-json/wp/v2/media'
-    import string
-    safe_filename = ''.join(c for c in filename if c in string.ascii_letters + string.digits + '-_.')
-    if not safe_filename or safe_filename == '.jpg':
-        safe_filename = f"eyecatch_{int(time.time())}.jpg"
-    if not safe_filename.endswith('.jpg'):
-        safe_filename += '.jpg'
-    headers = {
-        'Content-Disposition': f'attachment; filename="{safe_filename}"',
-        'Content-Type': 'image/jpeg'
-    }
-    try:
-        response = requests.post(
-            media_endpoint,
-            data=image_data,
-            headers=headers,
-            auth=HTTPBasicAuth(site_config['user'], site_config['password']),
-            timeout=60,
-            verify=False
-        )
-        if response.status_code == 201:
-            return response.json()['id']
-        return None
-    except Exception:
-        return None
-
-def generate_slug_from_title(title):
-    """タイトルから英数字のスラッグを生成"""
-    keyword_map = {
-        '投資': 'investment','資産': 'asset','運用': 'management','増やす': 'increase',
-        '貯金': 'savings','節約': 'saving','クレジット': 'credit','カード': 'card',
-        'ローン': 'loan','金融': 'finance','銀行': 'bank','保険': 'insurance','実践': 'practice',
-        '方法': 'method','戦略': 'strategy','ガイド': 'guide','初心者': 'beginner','完全': 'complete',
-        '効果': 'effect','成功': 'success','選び方': 'selection','比較': 'comparison','活用': 'utilization',
-        'おすすめ': 'recommend','基礎': 'basic','知識': 'knowledge'
-    }
-    slug_parts = ['money']
-    for jp_word, en_word in keyword_map.items():
-        if jp_word in title:
-            slug_parts.append(en_word); break
-    if len(slug_parts) == 1:
-        slug_parts.append('tips')
-    date_str = datetime.now().strftime('%m%d')
-    random_num = random.randint(100, 999)
-    return ('-'.join(slug_parts) + f'-{date_str}-{random_num}').lower()
+# ========================
+# Gemini
+# ========================
 
 def _get_gemini_key():
+    if not GEMINI_API_KEYS:
+        raise RuntimeError("Gemini APIキーが未設定です")
     key = GEMINI_API_KEYS[st.session_state.gemini_key_index % len(GEMINI_API_KEYS)]
     st.session_state.gemini_key_index += 1
     return key
+
 
 def call_gemini(prompt: str) -> str:
     api_key = _get_gemini_key()
@@ -494,6 +475,7 @@ def call_gemini(prompt: str) -> str:
         raise Exception(f"Gemini API エラー: {response.status_code} / {response.text[:200]}")
     result = response.json()
     return result['candidates'][0]['content']['parts'][0]['text']
+
 
 def generate_article_with_link(theme: str, url: str, anchor_text: str) -> dict:
     auto_theme = False
@@ -530,25 +512,49 @@ URL: {url}
 ・すべて具体的な内容で記述
 ・リンクは指定されたものを正確に使用
 """
-    try:
-        response = call_gemini(prompt)
-        lines = response.strip().split('\n')
-        title = lines[0].strip()
-        content = '\n'.join(lines[1:]).strip()
-        content = re.sub(r'〇〇|××|△△', '', content)
-        content = re.sub(r'（ここで.*?）', '', content)
-        content = re.sub(r'<p>\s*</p>', '', content)
-        content = content.strip()
-        return {"title": title, "content": content, "theme": theme if not auto_theme else "金融"}
-    except Exception as e:
-        st.error(f"記事生成エラー: {e}")
-        raise
+    response = call_gemini(prompt)
+    lines = response.strip().split('\n')
+    title = (lines[0] if lines else "タイトル").strip()
+    content = '\n'.join(lines[1:]).strip()
+    content = re.sub(r'〇〇|××|△△', '', content)
+    content = re.sub(r'（ここで.*?）', '', content)
+    content = re.sub(r'<p>\s*</p>', '', content)
+    content = content.strip()
+    # a属性強制
+    content = enforce_anchor_attrs(content)
+    return {"title": title, "content": content, "theme": theme if not auto_theme else "金融"}
 
 # ========================
-# WordPress 周り
+# WordPress 周り（あなたの実装を踏襲、WP_CONFIGSだけSecrets対応）
 # ========================
+
+def upload_image_to_wordpress(image_data: bytes, filename: str, site_config: dict) -> int | None:
+    media_endpoint = f'{site_config["url"]}wp-json/wp/v2/media'
+    import string
+    safe_filename = ''.join(c for c in filename if c in string.ascii_letters + string.digits + '-_.') or f"eyecatch_{int(time.time())}.jpg"
+    if not safe_filename.endswith('.jpg'):
+        safe_filename += '.jpg'
+    headers = {
+        'Content-Disposition': f'attachment; filename="{safe_filename}"',
+        'Content-Type': 'image/jpeg'
+    }
+    try:
+        response = requests.post(
+            media_endpoint,
+            data=image_data,
+            headers=headers,
+            auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+            timeout=60,
+            verify=False
+        )
+        if response.status_code == 201:
+            return response.json()['id']
+        return None
+    except Exception:
+        return None
+
+
 def get_category_id(site_config, category_name):
-    """カテゴリー名からIDを取得"""
     if not category_name:
         return None
     try:
@@ -562,9 +568,29 @@ def get_category_id(site_config, category_name):
     except Exception:
         return None
 
+
+def generate_slug_from_title(title):
+    keyword_map = {
+        '投資': 'investment','資産': 'asset','運用': 'management','増やす': 'increase',
+        '貯金': 'savings','節約': 'saving','クレジット': 'credit','カード': 'card',
+        'ローン': 'loan','金融': 'finance','銀行': 'bank','保険': 'insurance','実践': 'practice',
+        '方法': 'method','戦略': 'strategy','ガイド': 'guide','初心者': 'beginner','完全': 'complete',
+        '効果': 'effect','成功': 'success','選び方': 'selection','比較': 'comparison','活用': 'utilization',
+        'おすすめ': 'recommend','基礎': 'basic','知識': 'knowledge'
+    }
+    slug_parts = ['money']
+    for jp_word, en_word in keyword_map.items():
+        if jp_word in title:
+            slug_parts.append(en_word); break
+    if len(slug_parts) == 1:
+        slug_parts.append('tips')
+    date_str = datetime.now().strftime('%m%d')
+    random_num = random.randint(100, 999)
+    return ('-'.join(slug_parts) + f'-{date_str}-{random_num}').lower()
+
+
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None,
                       schedule_dt: datetime = None, enable_eyecatch: bool = True) -> str:
-    """WordPressに投稿（kosagiはXML-RPC）"""
     if site_key not in WP_CONFIGS:
         st.error(f"不明なサイト: {site_key}")
         return ""
@@ -597,7 +623,6 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             st.error(f"kosagi投稿エラー: {e}")
             return ""
 
-    # 通常WP: REST API
     featured_media_id = None
     if enable_eyecatch:
         try:
@@ -654,8 +679,8 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
         st.error(f"WordPress投稿エラー ({site_key}): {e}")
         return ""
 
+
 def test_wordpress_connection(site_key):
-    """WordPress接続テスト関数（REST: /users/me、kosagiはXML-RPC ping）"""
     if site_key not in WP_CONFIGS:
         st.error(f"設定が見つかりません: {site_key}")
         return False
@@ -696,13 +721,14 @@ def test_wordpress_connection(site_key):
         return False
 
 # ========================
-# 各プラットフォーム投稿関数
+# 各プラットフォーム投稿（Seesaa/FC2/Livedoor：a属性強制を追加）
 # ========================
+
 def post_to_seesaa(article: dict, category_name: str = None) -> str:
-    """Seesaa投稿"""
     config = PLATFORM_CONFIGS['seesaa']
     server = xmlrpc.client.ServerProxy(config['endpoint'], allow_none=True)
-    content = {"title": article["title"], "description": article["content"]}
+    safe_html = enforce_anchor_attrs(article["content"])  # ★追加
+    content = {"title": article["title"], "description": safe_html}
     try:
         post_id = server.metaWeblog.newPost(config['blogid'], config['username'], config['password'], content, True)
         if category_name:
@@ -726,11 +752,12 @@ def post_to_seesaa(article: dict, category_name: str = None) -> str:
         st.error(f"Seesaa投稿エラー: {e}")
         return ""
 
+
 def post_to_fc2(article: dict, category_name: str = None) -> str:
-    """FC2投稿"""
     config = PLATFORM_CONFIGS['fc2']
     server = xmlrpc.client.ServerProxy(config['endpoint'])
-    content = {'title': article['title'], 'description': article['content']}
+    safe_html = enforce_anchor_attrs(article['content'])  # ★追加
+    content = {'title': article['title'], 'description': safe_html}
     try:
         post_id = server.metaWeblog.newPost(config['blog_id'], config['username'], config['password'], content, True)
         if category_name:
@@ -747,13 +774,14 @@ def post_to_fc2(article: dict, category_name: str = None) -> str:
         st.error(f"FC2投稿エラー: {e}")
         return ""
 
+
 def post_to_livedoor(article: dict, category_name: str = None) -> str:
-    """livedoor投稿"""
     config = PLATFORM_CONFIGS['livedoor']
     root = f"https://livedoor.blogcms.jp/atompub/{config['blog_name']}"
     endpoint = f"{root}/article"
     title_xml = xml_escape(article["title"])
-    content_xml = xml_escape(article["content"])
+    safe_html = enforce_anchor_attrs(article["content"])  # ★追加
+    content_xml = xml_escape(safe_html)
     cat_xml = f'<category term="{xml_escape(category_name)}"/>' if category_name else ""
     entry_xml = f'''<?xml version="1.0" encoding="utf-8"?>
 <entry xmlns="http://www.w3.org/2005/Atom">
@@ -784,8 +812,8 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
         st.error(f"livedoor投稿エラー: {e}")
         return ""
 
+
 def post_to_blogger(article: dict) -> str:
-    """Blogger投稿(簡易実装)"""
     st.warning("Blogger投稿は未実装（認証が複雑なため）")
     return ""
 
@@ -825,6 +853,7 @@ def load_sheet_data(project_key):
         st.error(f"データ読み込みエラー: {e}")
         return pd.DataFrame()
 
+
 def update_sheet_row(project_key, row_data, updates):
     try:
         client = get_sheets_client()
@@ -844,8 +873,8 @@ def update_sheet_row(project_key, row_data, updates):
         st.error(f"スプレッドシート更新エラー: {e}")
         return False
 
+
 def add_schedule_to_k_column(project_key, row_data, schedule_times):
-    """K列以降に予約時刻を追加(非WordPressプロジェクト用)"""
     try:
         client = get_sheets_client()
         config = PROJECT_CONFIGS[project_key]
@@ -875,8 +904,8 @@ def add_schedule_to_k_column(project_key, row_data, schedule_times):
 # ========================
 # 投稿処理（プラットフォーム判定）
 # ========================
+
 def get_max_posts_for_project(project_key, post_target=""):
-    """プロジェクトと投稿先に応じた最大投稿数を取得"""
     config = PROJECT_CONFIGS[project_key]
     max_posts = config['max_posts']
     if isinstance(max_posts, dict):
@@ -889,13 +918,13 @@ def get_max_posts_for_project(project_key, post_target=""):
     else:
         return max_posts
 
+
 def add_realtime_log(message):
-    """リアルタイムログを追加"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     st.session_state.realtime_logs.append(f"[{timestamp}] {message}")
 
+
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
-    """投稿実行（行の『投稿先』を厳密に尊重 / WPは両方対応）"""
     try:
         st.session_state.posting_projects.add(project_key)
         add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始")
@@ -909,7 +938,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                 current_counter = 0
         add_realtime_log(f"📊 現在のカウンター: {current_counter}")
 
-        # 行の「投稿先」（WPならサイトキー / 非WPならプラットフォーム名）
         post_target = row_data.get('投稿先', '').strip() or (config.get('wp_sites', ['ykikaku'])[0] if 'wordpress' in config['platforms'] else '')
         add_realtime_log(f"🎯 投稿先: '{post_target}'")
 
@@ -931,7 +959,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
 
             with st.expander(f"記事{i+1}/{post_count}の投稿", expanded=True):
                 try:
-                    # 記事に使うリンク
                     if current_counter == max_posts - 1:
                         add_realtime_log(f"🎯 {max_posts}記事目 → 宣伝URL使用")
                         url = row_data.get('宣伝URL', '')
@@ -946,7 +973,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                             break
                         category = 'お金のマメ知識'
 
-                    # 記事生成
                     add_realtime_log("🧠 記事を生成中...")
                     with st.spinner("記事を生成中..."):
                         theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
@@ -957,37 +983,27 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     posted_urls = []
                     platforms = config['platforms']
 
-                    # =======================
-                    # 投稿処理 分岐開始
-                    # =======================
                     if 'wordpress' in platforms:
-                        # WPサイト群
                         available_sites = config.get('wp_sites', [])
-                        # ターゲット解析（両方/both は全投下）
                         if post_target in ['両方', 'both']:
                             wp_targets = available_sites[:]
                         elif post_target in available_sites:
                             wp_targets = [post_target]
-                        elif post_target in ['ykikaku', 'efdlqjtz']:
-                            # 他プロジェクトでこれを指定された場合にも対応
+                        elif post_target in WP_CONFIGS:
                             wp_targets = [post_target]
                         else:
                             wp_targets = [available_sites[0]] if available_sites else []
 
                         add_realtime_log(f"🧭 WP投稿ターゲット: {wp_targets}")
-
                         for tgt in wp_targets:
                             add_realtime_log(f"📤 {tgt} に投稿中...")
                             post_url = post_to_wordpress(article, tgt, category, schedule_dt, enable_eyecatch)
                             if post_url:
                                 posted_urls.append(post_url)
-                                add_realtime_log(f"✅ {tgt} 投稿成功: {post_url}")
-                                st.markdown(f"- **{tgt}**: [{post_url}]({post_url})")
+                                add_realtime_log(f"✅ {tgt} 投稿成功")
                             else:
                                 add_realtime_log(f"❌ {tgt} 投稿失敗")
-
                     else:
-                        # ★ 非WordPress案件の分岐（biggift / arigataya など）
                         desired_target = (row_data.get('投稿先', '') or '').strip().lower()
 
                         def do_post(target_name: str):
@@ -998,8 +1014,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ livedoor投稿成功")
-                                    add_realtime_log(f"🔗 URL: {post_url}")
-                                    st.markdown(f"- **livedoor**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("❌ livedoor投稿失敗")
                             elif target_name == 'seesaa':
@@ -1008,8 +1022,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ Seesaa投稿成功")
-                                    add_realtime_log(f"🔗 URL: {post_url}")
-                                    st.markdown(f"- **Seesaa**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("❌ Seesaa投稿失敗")
                             elif target_name == 'fc2':
@@ -1018,8 +1030,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ FC2投稿成功")
-                                    add_realtime_log(f"🔗 URL: {post_url}")
-                                    st.markdown(f"- **livedoor**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("❌ FC2投稿失敗")
                             elif target_name == 'blogger':
@@ -1028,8 +1038,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 if post_url:
                                     posted_urls.append(post_url)
                                     add_realtime_log("✅ Blogger投稿成功")
-                                    add_realtime_log(f"🔗 URL: {post_url}")
-                                    st.markdown(f"- **livedoor**: [{post_url}]({post_url})")
                                 else:
                                     add_realtime_log("⚠️ Blogger投稿は未実装（認証が複雑なため）")
                             else:
@@ -1048,9 +1056,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                         add_realtime_log(f"🎯 実際に投稿するターゲット: {targets}")
                         for t in targets:
                             do_post(t)
-                    # =======================
-                    # 投稿処理 分岐終了
-                    # =======================
 
                     if not posted_urls:
                         add_realtime_log("❌ 投稿に失敗しました")
@@ -1060,7 +1065,6 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     current_counter += 1
                     posts_completed += 1
 
-                    # スプレッドシート更新
                     updates = {'カウンター': str(current_counter)}
                     if current_counter >= max_posts:
                         updates['ステータス'] = '処理済み'
@@ -1091,8 +1095,9 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         st.session_state.posting_projects.discard(project_key)
 
 # ========================
-# UI構築
+# UI構築（あなたの画面構成を踏襲）
 # ========================
+
 def main():
     st.title("SEOブログ自動化ツール")
     st.write("記事を自動生成して複数のプラットフォームに投稿します")
@@ -1111,7 +1116,7 @@ def main():
         format_func=lambda x: project_options[x],
         disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,
         key="project_selector"
-    )
+            )
 
     if project_key in st.session_state.posting_projects:
         st.warning(f"🚀 {PROJECT_CONFIGS[project_key]['worksheet']} 投稿処理中です。完了まで設定を変更しないでください。")
@@ -1123,6 +1128,7 @@ def main():
                     st.session_state.realtime_logs = []
                     st.rerun()
 
+    # プロジェクト切替時はキャッシュをクリア
     current_project = st.session_state.get('current_project')
     if current_project != project_key and project_key not in st.session_state.posting_projects:
         st.session_state.current_project = project_key
@@ -1164,6 +1170,7 @@ def main():
                         test_wordpress_connection(site)
                         st.write("---")
 
+    # データ読込
     df = load_sheet_data(project_key)
     if df.empty:
         st.info("未処理のデータがありません")
@@ -1186,12 +1193,13 @@ def main():
     )
 
     st.header("投稿設定")
-    col1, col2 = st.columns(2)
-    with col1:
+    colA, colB = st.columns(2)
+    with colA:
         post_count = st.selectbox("投稿数", options=[1, 2, 3, 4, 5], help="一度に投稿する記事数を選択")
-    with col2:
+    with colB:
         enable_eyecatch = st.checkbox("アイキャッチ画像を自動生成", value=True)
 
+    # 予約入力UI
     if config['needs_k_column']:
         st.markdown("""
         <div class="warning-box">
@@ -1277,14 +1285,16 @@ def main():
                 if len(schedule_times) < post_count and enable_schedule:
                     st.warning(f"投稿数{post_count}に対して予約時刻が{len(schedule_times)}件")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
+    # 実行ボタン／更新ボタン
+    colExec, colRefresh = st.columns(2)
+    with colExec:
         if config['needs_k_column'] and enable_schedule:
             button_text = "K列に予約時刻を記録"
         elif not config['needs_k_column'] and enable_schedule:
             button_text = "予約投稿"
         else:
             button_text = "即時投稿"
+
         if st.button(button_text, type="primary", use_container_width=True):
             selected_rows = edited_df[edited_df['選択'] == True]
             if len(selected_rows) == 0:
@@ -1297,26 +1307,30 @@ def main():
                     if not schedule_times:
                         st.error("予約時刻を入力してください")
                     else:
-                        success = add_schedule_to_k_column(project_key, row.to_dict(), schedule_times)
-                        if success:
+                        ok = add_schedule_to_k_column(project_key, row.to_dict(), schedule_times)
+                        if ok:
                             st.success("K列に予約時刻を記録しました。GitHub Actionsで実行されます。")
-                            time.sleep(1.5); st.cache_data.clear(); st.rerun()
+                            time.sleep(1.5)
+                            st.cache_data.clear()
+                            st.rerun()
                 else:
-                    success = execute_post(
+                    ok = execute_post(
                         row.to_dict(),
                         project_key,
                         post_count=post_count,
                         schedule_times=schedule_times if enable_schedule else [],
                         enable_eyecatch=enable_eyecatch
                     )
-                    if success:
+                    if ok:
                         st.cache_data.clear()
-    with col_b:
+
+    with colRefresh:
         if st.button("データ更新", use_container_width=True):
             st.cache_data.clear()
             st.success("データを更新しました")
             st.rerun()
 
+    # GitHub Actions のサンプル
     if config['needs_k_column']:
         with st.expander("GitHub Actions設定"):
             st.code("""
@@ -1343,9 +1357,21 @@ jobs:
         env:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          SEESAA_USERNAME: ${{ secrets.SEESAA_USERNAME }}
+          SEESAA_PASSWORD: ${{ secrets.SEESAA_PASSWORD }}
+          SEESAA_BLOGID:  ${{ secrets.SEESAA_BLOGID }}
+          FC2_BLOG_ID:    ${{ secrets.FC2_BLOG_ID }}
+          FC2_USERNAME:   ${{ secrets.FC2_USERNAME }}
+          FC2_PASSWORD:   ${{ secrets.FC2_PASSWORD }}
+          LIVEDOOR_BLOG_NAME: ${{ secrets.LIVEDOOR_BLOG_NAME }}
+          LIVEDOOR_ID:        ${{ secrets.LIVEDOOR_ID }}
+          LIVEDOOR_API_KEY:   ${{ secrets.LIVEDOOR_API_KEY }}
         run: python scripts/post_executor.py
 """, language="yaml")
 
+    # 使い方
     with st.expander("使い方"):
         st.markdown(f"""
 **プロジェクト: {config['worksheet']}**
@@ -1360,14 +1386,14 @@ jobs:
 """)
 
     st.markdown("---")
-    col_info1, col_info2, col_info3 = st.columns(3)
-    with col_info1:
+    c1, c2, c3 = st.columns(3)
+    with c1:
         st.metric("未処理件数", len(df))
-    with col_info2:
+    with c2:
         st.metric("プラットフォーム", len(config['platforms']))
-    with col_info3:
+    with c3:
         st.metric("最終更新", datetime.now().strftime("%H:%M:%S"))
+
 
 if __name__ == "__main__":
     main()
-
