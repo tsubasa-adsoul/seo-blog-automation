@@ -19,7 +19,6 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 import io
 from PIL import Image, ImageDraw, ImageFont
-from scripts.blogger_client import post_to_blogger
 
 # Optional: avoid SSL warning noise (REST verify=False を使うため)
 try:
@@ -805,9 +804,40 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
         st.error(f"livedoor投稿エラー: {e}")
         return ""
 
-def post_to_blogger(article: dict) -> str:
-    st.warning("Blogger投稿は未実装（認証が複雑なため）")
-    return ""
+def post_to_blogger_local(article: dict, category_name: str = None) -> str:
+    """ローカル用のBlogger投稿関数（外部モジュールを呼び出し）"""
+    try:
+        from scripts.blogger_client import post_to_blogger
+        add_realtime_log("📤 Blogger API 呼び出し中...")
+        
+        # ラベル（カテゴリ）を配列で準備
+        labels = [category_name] if category_name else ["金融"]
+        
+        # 外部モジュールのpost_to_blogger関数を呼び出し
+        # 戻り値: (post_url, response_data)
+        post_url, response = post_to_blogger(
+            title=article["title"],
+            html_body=article["content"],
+            labels=labels,
+            blog_id=None,  # secrets からの blog_id を使用
+            schedule_dt=None  # 即時投稿
+        )
+        
+        if post_url:
+            add_realtime_log(f"✅ Blogger投稿成功: {post_url}")
+            return post_url
+        else:
+            add_realtime_log("❌ Blogger投稿失敗: URLが取得できませんでした")
+            st.error("Blogger投稿に失敗しました")
+            return ""
+            
+    except ImportError:
+        st.error("blogger_client モジュールがインポートできません")
+        return ""
+    except Exception as e:
+        add_realtime_log(f"❌ Blogger投稿エラー: {e}")
+        st.error(f"Blogger投稿エラー: {e}")
+        return ""
 
 # ========================
 # シート I/O
@@ -1361,4 +1391,3 @@ jobs:
 
 if __name__ == "__main__":
     main()
-
