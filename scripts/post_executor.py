@@ -286,8 +286,30 @@ URL: {url}
         raise
 
 # ----------------------------
-# 各プラットフォーム投稿関数
+# 各プラットフォーム投稿関数（EXE版から移植）
 # ----------------------------
+
+# リンク属性強制付与関数（EXE版から移植）
+def enforce_anchor_attrs(html: str) -> str:
+    def add_attrs(m):
+        tag = m.group(0)
+        if re.search(r'\btarget\s*=', tag, flags=re.I) is None:
+            tag = tag.replace('<a ', '<a target="_blank" ', 1)
+        rel_m = re.search(r'\brel\s*=\s*"([^"]*)"', tag, flags=re.I)
+        if rel_m:
+            rel_val = rel_m.group(1)
+            need = []
+            for t in ('noopener', 'noreferrer'):
+                if t not in rel_val.split():
+                    need.append(t)
+            if need:
+                new_rel = rel_val + ' ' + ' '.join(need)
+                tag = tag[:rel_m.start(1)] + new_rel + tag[rel_m.end(1):]
+        else:
+            tag = tag.replace('<a ', '<a rel="noopener noreferrer" ', 1)
+        return tag
+    return re.sub(r'<a\s+[^>]*>', add_attrs, html, flags=re.I)
+
 def post_to_seesaa(article: dict, category_name: str = None) -> str:
     config = PLATFORM_CONFIGS['seesaa']
     server = xmlrpc.client.ServerProxy(config['endpoint'], allow_none=True)
@@ -356,12 +378,14 @@ def post_to_fc2(article: dict, category_name: str = None) -> str:
         return ""
 
 def post_to_livedoor(article: dict, category_name: str = None) -> str:
+    """livedoor投稿（EXE版から移植）"""
     config = PLATFORM_CONFIGS['livedoor']
     root = f"https://livedoor.blogcms.jp/atompub/{config['blog_name']}"
     endpoint = f"{root}/article"
     
     title_xml = xml_escape(article["title"])
-    content_xml = xml_escape(article["content"])
+    safe_html = enforce_anchor_attrs(article["content"])  # EXE版の機能を適用
+    content_xml = xml_escape(safe_html)
     cat_xml = f'<category term="{xml_escape(category_name)}"/>' if category_name else ""
     
     entry_xml = f'''<?xml version="1.0" encoding="utf-8"?>
@@ -397,8 +421,10 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
         return ""
 
 def post_to_blogger(article: dict) -> str:
-    """Blogger投稿（簡易実装）"""
-    logger.warning("⚠️ Blogger投稿は未実装（認証が複雑なため）")
+    """Blogger投稿（EXE版機能の簡易版）"""
+    logger.warning("⚠️ Blogger投稿は未実装（OAuth2認証が必要）")
+    logger.info(f"📝 Blogger投稿予定記事: {article['title']}")
+    # EXE版の完全なOAuth2実装が必要
     return ""
 
 # ----------------------------
@@ -434,12 +460,7 @@ def get_max_posts_for_project(project_key: str, post_target: str = "") -> int:
 def execute_scheduled_post(row: List[str], project_key: str, sheet, row_idx: int, 
                          col_idx: int, other_links: List[Dict], competitor_domains: List[str]) -> bool:
     """
-    単一の予約投稿を実行
-    - 記事生成（1〜N-1: その他リンク / N: 宣伝URL）
-    - プラットフォーム投稿
-    - カウンター更新
-    - K列該当セルを「完了」に更新
-    - 最終記事時に「処理済み」＆I列日時記録
+    単一の予約投稿を実行（完全ログ記録対応）
     """
     try:
         config = NON_WP_PROJECTS[project_key]
@@ -517,9 +538,16 @@ def execute_scheduled_post(row: List[str], project_key: str, sheet, row_idx: int
             logger.error("❌ 全プラットフォーム投稿失敗")
             return False
         
-        # スプレッドシート更新
+        # 全記事のURLをログに記録
         new_counter = current_counter + 1
+        timestamp = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
         
+        for url_result in posted_urls:
+            logger.info(f"📋 記事{new_counter}記録: {article['title']}")
+            logger.info(f"🔗 投稿URL: {url_result}")
+            logger.info(f"⏰ 投稿時刻: {timestamp}")
+        
+        # スプレッドシート更新
         # カウンター更新（G列=7）
         sheet.update_cell(row_idx, 7, str(new_counter))
         
@@ -531,7 +559,7 @@ def execute_scheduled_post(row: List[str], project_key: str, sheet, row_idx: int
             # ステータス「処理済み」（E列=5）
             sheet.update_cell(row_idx, 5, "処理済み")
             
-            # 投稿URL（F列=6）
+            # 最終記事のURLのみスプレッドシートに記録（F列=6）
             sheet.update_cell(row_idx, 6, ', '.join(posted_urls))
             
             # I列（9列目）に日時記録
@@ -548,14 +576,12 @@ def execute_scheduled_post(row: List[str], project_key: str, sheet, row_idx: int
         logger.error(f"❌ 投稿実行エラー: {e}")
         return False
 
-def check_and_execute_k_column_schedules(window_minutes: int = 30) -> Dict[str, int]:
+def check_and_execute_k_column_schedules(window_minutes: int = 30, target_projects: dict = None) -> Dict[str, int]:
     """
-    K列予約投稿チェック＆実行
-    - 非WordPressプロジェクトのK列以降をチェック
-    - 現在時刻〜+window_minutes内の予約を実行
+    K列予約投稿チェック＆実行（プロジェクトフィルター対応）
     """
     if target_projects is None:
-        target_projects = NON_WP_PROJECTS  # ← この行を追加
+        target_projects = NON_WP_PROJECTS  # ← 修正済み
     
     logger.info("⏰ K列予約投稿チェック開始")
     client = get_sheets_client()
@@ -569,7 +595,7 @@ def check_and_execute_k_column_schedules(window_minutes: int = 30) -> Dict[str, 
     executed_total = 0
     skipped_total = 0
     
-    for project_key, config in target_projects.items():  # ← NON_WP_PROJECTSではなくtarget_projects
+    for project_key, config in target_projects.items():  # ← 修正済み
         try:
             logger.info(f"📋 {project_key} ({config['worksheet']}) チェック中...")
             sheet = client.open_by_key(SPREADSHEET_ID).worksheet(config['worksheet'])
@@ -635,14 +661,22 @@ def main():
     parser = argparse.ArgumentParser(description='K列予約投稿実行スクリプト（GitHub Actions用）')
     parser.add_argument('--window', type=int, default=30, help='実行ウィンドウ（分）')
     parser.add_argument('--test', action='store_true', help='テストモード')
-    parser.add_argument('--project', type=str, help='特定プロジェクトのみ実行（biggift/arigataya）')  # ← この行を追加
-
+    parser.add_argument('--project', type=str, help='特定プロジェクトのみ実行（biggift/arigataya）')  # ← 修正済み
     
     args = parser.parse_args()
     
+    # プロジェクトフィルター機能を追加
+    target_projects = NON_WP_PROJECTS
+    if args.project:
+        if args.project in NON_WP_PROJECTS:
+            target_projects = {args.project: NON_WP_PROJECTS[args.project]}
+            logger.info(f"🎯 特定プロジェクト実行: {args.project}")
+        else:
+            logger.error(f"❌ 不明なプロジェクト: {args.project}")
+            exit(1)
+    
     if args.test:
         logger.info("🧪 テストモード - 実際の投稿は行いません")
-        # テスト用のデータチェックのみ
         try:
             client = get_sheets_client()
             logger.info("✅ Google Sheets接続成功")
@@ -650,6 +684,10 @@ def main():
             competitor_domains = get_competitor_domains()
             other_links = get_other_links()
             logger.info(f"✅ データ取得成功: 競合{len(competitor_domains)}件、その他{len(other_links)}件")
+            
+            # 対象プロジェクトの表示
+            for project_key in target_projects:
+                logger.info(f"📋 対象プロジェクト: {project_key}")
             
             logger.info("🧪 テストモード完了")
         except Exception as e:
@@ -659,8 +697,17 @@ def main():
     
     logger.info(f"🚀 K列予約投稿チェック開始: ウィンドウ={args.window}分")
     
+    # 対象プロジェクトをログ出力
+    if args.project:
+        logger.info(f"🎯 実行対象: {args.project}のみ")
+    else:
+        logger.info(f"📋 実行対象: 全プロジェクト ({', '.join(NON_WP_PROJECTS.keys())})")
+    
     try:
-        result = check_and_execute_k_column_schedules(window_minutes=args.window)
+        result = check_and_execute_k_column_schedules(
+            window_minutes=args.window, 
+            target_projects=target_projects  # ← 修正済み
+        )
         logger.info(f"✅ 処理完了: {result}")
         
         # GitHub Actions用の出力
@@ -673,5 +720,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
