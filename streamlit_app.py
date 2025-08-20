@@ -137,24 +137,8 @@ def generate_slug_from_title(title):
 # アイキャッチ自動生成（完全版）
 # ========================
 def _jp_font(size: int) -> ImageFont.FreeTypeFont:
-    """
-    日本語フォント解決（同梱フォント最優先 / 各環境フォールバック）
-    """
-    candidates = [
-        Path(__file__).parent / "fonts" / "NotoSansJP-Bold.ttf",  # 同梱（最優先）
-        Path("fonts") / "NotoSansJP-Bold.ttf",                    # 実行ディレクトリ直下
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", # Linuxにあれば
-        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",    # Linuxにあれば
-        "C:/Windows/Fonts/meiryo.ttc",                            # Windows
-        "C:/Windows/Fonts/meiryob.ttc",                           # Windows（太字）
-    ]
-    for p in candidates:
-        try:
-            return ImageFont.truetype(str(p), size)
-        except Exception:
-            continue
-    # 最終フォールバック（英数のみになる可能性あり）
-    return ImageFont.load_default()
+    path = Path(__file__).parent / "fonts" / "NotoSansJP-Bold.ttf"
+    return ImageFont.truetype(str(path), size)
     
 def create_eyecatch_image(title: str, site_key: str) -> bytes:
     """タイトルからアイキャッチ画像を自動生成（Cloud対応・サイト別カラー・サイト名非表示）"""
@@ -1580,6 +1564,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
