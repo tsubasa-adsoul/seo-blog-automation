@@ -114,7 +114,7 @@ WP_CONFIGS = {
         'password': 'xVA8 6yxD TdkP CJE4 yoQN qAHn'
     },
     'thrones': {
-        'url': 'https://www.thrones.jp/',
+        'url': 'https://thrones.v2009.coreserver.jp/',
         'user': 'thrones',
         'password': 'Fz9k fB3y wJuN tL8m zPqX vR4s'
     }
@@ -637,12 +637,17 @@ URL: {url}
 # ========================
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
                       schedule_dt: datetime = None, enable_eyecatch: bool = True) -> str:
-    """WordPressに投稿（アイキャッチ画像・予約投稿対応・kosagi特別対応）"""
+    """WordPressに投稿（エラー処理強化版）"""
     if site_key not in WP_CONFIGS:
         st.error(f"不明なサイト: {site_key}")
         return ""
     
     site_config = WP_CONFIGS[site_key]
+    
+    # 無効化されたサイトをスキップ
+    if site_config.get('disabled', False):
+        st.warning(f"{site_key}は現在無効化されています（サーバー問題のため）")
+        return ""
     
     # kosagiの特別処理（XMLRPC方式）
     if site_key == 'kosagi':
@@ -800,7 +805,8 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 auth=HTTPBasicAuth(site_config['user'], site_config['password']),
                 headers={'Content-Type': 'application/json'},
                 data=json.dumps(post_data),
-                timeout=60
+                timeout=60,
+                verify=False  # SSL証明書の検証を無効化（一時的な回避策）
             )
             
             if response.status_code in (201, 200):
