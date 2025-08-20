@@ -1,0 +1,17 @@
+from pathlib import Path
+from PIL import ImageFont
+
+def _jp_font(size: int) -> ImageFont.FreeTypeFont:
+    candidates = [
+        Path(__file__).parent / "fonts" / "NotoSansJP-Bold.ttf",   # 同梱フォント（最優先）
+        Path("fonts/NotoSansJP-Bold.ttf"),                         # 実行場所直下
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # ある場合
+        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",     # ある場合
+        "C:/Windows/Fonts/meiryo.ttc",                             # Windows EXE用フォールバック
+    ]
+    for p in candidates:
+        try:
+            return ImageFont.truetype(str(p), size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
