@@ -657,7 +657,7 @@ URL: {url}
         raise
 
 # ========================
-# 各プラットフォーム投稿関数（通知システム対応・リトライ修正版）
+# 各プラットフォーム投稿関数（完全修正版）
 # ========================
 
 # リンク属性強制付与関数（EXE版から移植）
@@ -880,7 +880,7 @@ def post_to_blogger(article: dict, project_key: str = None) -> str:
 
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
                       schedule_dt: datetime = None, enable_eyecatch: bool = True, project_key: str = None) -> str:
-    """WordPressに投稿（シンプル版・リトライ機能なし）"""
+    """WordPressに投稿（完全修正版）"""
     if site_key not in WP_CONFIGS:
         add_notification(f"不明なサイト: {site_key}", "error", project_key)
         return ""
@@ -891,16 +891,31 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     if site_key == 'kosagi':
         if schedule_dt and schedule_dt > datetime.now():
             wait_seconds = (schedule_dt - datetime.now()).total_seconds()
-            add_notification(f"kosagi用: {schedule_dt.strftime('%Y/%m/%d %H:%M')}まで待機します（{int(wait_seconds)}秒）", "info", project_key)
+            add_notification(f"kosagi用: {schedule_dt.strftime('%Y/%m/%d %H:%M')}まで{int(wait_seconds)}秒待機します", "info", project_key)
+            
+            # 待機時間が1時間を超える場合は警告
+            if wait_seconds > 3600:
+                add_notification(f"⚠️ 待機時間が{int(wait_seconds/3600)}時間と長すぎます。即時投稿を推奨します。", "warning", project_key)
             
             progress_bar = st.progress(0)
             total_seconds = int(wait_seconds)
             
+            # 待機処理
             for i in range(total_seconds):
                 progress_bar.progress((i + 1) / total_seconds)
                 time.sleep(1)
+                
+                # 30秒ごとに進捗を通知
+                if (i + 1) % 30 == 0:
+                    remaining = total_seconds - (i + 1)
+                    remaining_hours = remaining // 3600
+                    remaining_minutes = (remaining % 3600) // 60
+                    if remaining_hours > 0:
+                        add_notification(f"⏳ kosagi待機中... 残り{remaining_hours}時間{remaining_minutes}分", "info", project_key)
+                    else:
+                        add_notification(f"⏳ kosagi待機中... 残り{remaining_minutes}分", "info", project_key)
             
-            add_notification("予約時刻になりました。kosagiに投稿を開始します", "success", project_key)
+            add_notification("✅ 予約時刻になりました。kosagiに投稿を開始します", "success", project_key)
         
         # XMLRPC方式で即時投稿
         endpoint = f"{site_config['url']}xmlrpc.php"
@@ -955,7 +970,10 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             
             if response.status_code == 200:
                 if '<name>faultCode</name>' in response.text:
-                    add_notification(f"kosagi XMLRPC投稿エラー: {response.text[:300]}", "error", project_key)
+                    # エラー詳細を抽出
+                    fault_match = re.search(r'<name>faultString</name>.*?<string>(.*?)</string>', response.text, re.DOTALL)
+                    fault_msg = fault_match.group(1) if fault_match else "不明なエラー"
+                    add_notification(f"kosagi XMLRPC投稿エラー: {fault_msg}", "error", project_key)
                     return ""
                 
                 match = re.search(r'<string>(\d+)</string>', response.text)
@@ -971,6 +989,12 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 add_notification(f"kosagi投稿失敗: HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
                 return ""
                 
+        except requests.exceptions.Timeout:
+            add_notification(f"kosagi投稿タイムアウト: 60秒でタイムアウトしました", "error", project_key)
+            return ""
+        except requests.exceptions.ConnectionError as conn_error:
+            add_notification(f"kosagi接続エラー: {str(conn_error)}", "error", project_key)
+            return ""
         except Exception as e:
             add_notification(f"kosagi投稿エラー: {str(e)}", "error", project_key)
             return ""
@@ -1030,7 +1054,6 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
         try:
             add_notification(f"{site_key} REST API投稿を開始します", "info", project_key)
             
-            # シンプルなリクエスト（リトライ機能なし）
             response = requests.post(
                 endpoint,
                 auth=HTTPBasicAuth(site_config['user'], site_config['password']),
@@ -1052,35 +1075,35 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                     return post_url
                     
                 except json.JSONDecodeError as json_error:
-                    add_notification(f"WordPress投稿成功だがレスポンス解析エラー ({site_key}): {str(json_error)}", "warning", project_key)
+                    add_notification(f"{site_key}投稿成功だがレスポンス解析エラー: {str(json_error)}", "warning", project_key)
                     return f"{site_config['url']}"
                     
             elif response.status_code == 401:
-                add_notification(f"WordPress認証エラー ({site_key}): ユーザー名またはパスワードが間違っています", "error", project_key)
+                add_notification(f"{site_key}認証エラー: ユーザー名またはパスワードが間違っています", "error", project_key)
                 return ""
             elif response.status_code == 403:
-                add_notification(f"WordPress権限エラー ({site_key}): 投稿権限がありません", "error", project_key)
+                add_notification(f"{site_key}権限エラー: 投稿権限がありません", "error", project_key)
                 return ""
             elif response.status_code == 404:
-                add_notification(f"WordPress APIエラー ({site_key}): REST APIが無効か、URLが間違っています", "error", project_key)
+                add_notification(f"{site_key}APIエラー: REST APIが無効か、URLが間違っています", "error", project_key)
                 return ""
             else:
                 try:
                     error_detail = response.json()
                     error_msg = error_detail.get('message', 'Unknown error')
-                    add_notification(f"WordPress投稿失敗 ({site_key}): HTTP {response.status_code} - {error_msg}", "error", project_key)
+                    add_notification(f"{site_key}投稿失敗: HTTP {response.status_code} - {error_msg}", "error", project_key)
                 except:
-                    add_notification(f"WordPress投稿失敗 ({site_key}): HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
+                    add_notification(f"{site_key}投稿失敗: HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
                 return ""
                 
         except requests.exceptions.Timeout:
-            add_notification(f"WordPress投稿タイムアウト ({site_key}): 60秒でタイムアウトしました", "error", project_key)
+            add_notification(f"{site_key}投稿タイムアウト: 60秒でタイムアウトしました", "error", project_key)
             return ""
-        except requests.exceptions.ConnectionError:
-            add_notification(f"WordPress接続エラー ({site_key}): サイトに接続できません", "error", project_key)
+        except requests.exceptions.ConnectionError as conn_error:
+            add_notification(f"{site_key}接続エラー: {str(conn_error)}", "error", project_key)
             return ""
         except Exception as e:
-            add_notification(f"WordPress投稿エラー ({site_key}): {str(e)}", "error", project_key)
+            add_notification(f"{site_key}投稿エラー: {str(e)}", "error", project_key)
             return ""
 
 # ========================
@@ -1246,10 +1269,10 @@ def add_schedule_to_k_column(project_key, row_data, schedule_times):
         return False
 
 # ========================
-# 投稿処理（完全版・プロジェクト別ログ・スプシ更新修正・通知システム対応）
+# 投稿処理（完全修正版・投稿先指定修正）
 # ========================
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
-    """投稿実行（完全版・プロジェクト別ログ・スプシ更新修正・通知システム対応）"""
+    """投稿実行（完全修正版・投稿先指定修正）"""
     try:
         st.session_state.posting_projects.add(project_key)
         
@@ -1276,6 +1299,9 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         
         post_target = row_data.get('投稿先', '').strip()
         max_posts = get_max_posts_for_project(project_key, post_target)
+        
+        # 投稿先の確認ログ
+        add_notification(f"投稿先指定: '{post_target}'", "info", project_key)
         
         if current_counter >= max_posts:
             add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み", project_key)
@@ -1327,13 +1353,31 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     st.success(f"タイトル: {article['title']}")
                     st.info(f"使用リンク: {anchor}")
                     
-                    # プラットフォーム別投稿
+                    # プラットフォーム別投稿（完全修正版）
                     posted_urls = []
                     platforms = config['platforms']
                     
                     if 'wordpress' in platforms:
-                        for site_key in config.get('wp_sites', []):
-                            if not post_target or post_target in [site_key, '両方']:
+                        # 投稿先が指定されている場合はその1つのサイトのみ
+                        if post_target and post_target in config.get('wp_sites', []):
+                            add_realtime_log(f"📤 {post_target}のみに投稿中...", project_key)
+                            add_notification(f"指定サイト '{post_target}' に投稿します", "info", project_key)
+                            
+                            post_url = post_to_wordpress(
+                                article, 
+                                post_target, 
+                                category, 
+                                schedule_dt, 
+                                enable_eyecatch,
+                                project_key
+                            )
+                            if post_url:
+                                posted_urls.append(post_url)
+                                add_realtime_log(f"✅ {post_target}投稿成功: {post_url}", project_key)
+                        else:
+                            # 投稿先が指定されていない場合は全サイト（従来通り）
+                            add_notification("投稿先が未指定のため、全サイトに投稿します", "info", project_key)
+                            for site_key in config.get('wp_sites', []):
                                 add_realtime_log(f"📤 {site_key}に投稿中...", project_key)
                                 post_url = post_to_wordpress(
                                     article, 
