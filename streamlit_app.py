@@ -140,11 +140,11 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     if site_key in ['ncepqvub', 'kosagi']:
         # 赤系カラー（赤いサイト用）
         color_schemes = [
-            {'bg': '#B71C1C', 'accent': '#EF5350', 'text': '#FFFFFF'},
-            {'bg': '#C62828', 'accent': '#FF5252', 'text': '#FFFFFF'},
-            {'bg': '#D32F2F', 'accent': '#FF8A80', 'text': '#FFFFFF'},
-            {'bg': '#E53935', 'accent': '#FFCDD2', 'text': '#FFFFFF'},
-            {'bg': '#8B0000', 'accent': '#DC143C', 'text': '#FFFFFF'},
+            {'bg': '#B71C1C', 'accent': '#EF5350', 'text': '#FFFFFF'},  # 深紅×ライトレッド
+            {'bg': '#C62828', 'accent': '#FF5252', 'text': '#FFFFFF'},  # レッド×明るいレッド
+            {'bg': '#D32F2F', 'accent': '#FF8A80', 'text': '#FFFFFF'},  # 標準レッド×薄いレッド
+            {'bg': '#E53935', 'accent': '#FFCDD2', 'text': '#FFFFFF'},  # 明るいレッド×ピンクレッド
+            {'bg': '#8B0000', 'accent': '#DC143C', 'text': '#FFFFFF'},  # ダークレッド×クリムゾン
         ]
     else:
         # 緑系カラー（他のサイト用）
@@ -162,7 +162,7 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     img = Image.new('RGB', (width, height), color=scheme['bg'])
     draw = ImageDraw.Draw(img)
     
-    # 背景にグラデーション効果
+    # 背景にグラデーション効果（簡易版）
     for i in range(height):
         alpha = i / height
         r = int(int(scheme['bg'][1:3], 16) * (1 - alpha * 0.3))
@@ -171,14 +171,18 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
         draw.rectangle([(0, i), (width, i + 1)], fill=(r, g, b))
     
     # 装飾的な図形を追加
+    # 左上の円
     draw.ellipse([-50, -50, 150, 150], fill=scheme['accent'])
+    # 右下の円
     draw.ellipse([width-100, height-100, width+50, height+50], fill=scheme['accent'])
     
     # フォント設定
     try:
+        # メイリオボールド（太字）で統一
         title_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 28)
         subtitle_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 20)
     except:
+        # フォールバック（通常のメイリオ）
         try:
             title_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 28)
             subtitle_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 20)
@@ -232,7 +236,7 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
         # 本体
         draw.text((x, y), line, font=title_font, fill=scheme['text'])
     
-    # サイト名の設定（完全版）
+    # サイト名の設定（赤いサイト用）
     site_names = {
         'selectadvance': 'Select Advance',
         'welkenraedt': 'Welkenraedt Online',
@@ -264,6 +268,7 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     buf.seek(0)
     
     return buf.getvalue()
+
 
 # post_to_wordpress関数（完全版・2段階処理）
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None,
@@ -1611,3 +1616,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
