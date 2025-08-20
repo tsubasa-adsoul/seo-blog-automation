@@ -148,7 +148,7 @@ MAX_INTERVAL = 120
 # Streamlit設定
 # ========================
 st.set_page_config(
-    page_title="🚀 統合ブログ投稿ツール",
+    page_title="統合ブログ投稿ツール",
     page_icon="🚀",
     layout="wide"
 )
@@ -207,17 +207,21 @@ if 'gemini_key_index' not in st.session_state:
 def get_sheets_client():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     
-    # 環境変数から認証情報を取得
-    creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
-    if creds_json:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write(creds_json)
-            temp_path = f.name
-        creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
-        os.unlink(temp_path)
-    else:
-        # ローカルファイルを使用
-        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    # Streamlit Secretsから認証情報を取得
+    creds_json = st.secrets.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    if not creds_json:
+        # 環境変数から取得（GitHub Actions用）
+        creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+    
+    if not creds_json:
+        st.error("Google認証情報が設定されていません。Secretsを確認してください。")
+        st.stop()
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        f.write(creds_json)
+        temp_path = f.name
+    creds = ServiceAccountCredentials.from_json_keyfile_name(temp_path, scope)
+    os.unlink(temp_path)
     
     return gspread.authorize(creds)
 
@@ -375,7 +379,7 @@ URL: {url}
         }
         
     except Exception as e:
-        st.error(f"❌ 記事生成エラー: {e}")
+        st.error(f"記事生成エラー: {e}")
         raise
 
 # ========================
@@ -384,7 +388,7 @@ URL: {url}
 def post_to_wordpress(article_data: dict, site_key: str, schedule_dt: datetime = None) -> str:
     """WordPressに投稿（即時 or 予約）"""
     if site_key not in WP_CONFIGS:
-        st.error(f"❌ 不明なサイト: {site_key}")
+        st.error(f"不明なサイト: {site_key}")
         return ""
     
     site_config = WP_CONFIGS[site_key]
@@ -406,7 +410,7 @@ def post_to_wordpress(article_data: dict, site_key: str, schedule_dt: datetime =
     if schedule_dt and schedule_dt > datetime.now():
         post_data['status'] = 'future'
         post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
-        st.info(f"⏰ 予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
+        st.info(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
     else:
         post_data['status'] = 'publish'
     
@@ -422,16 +426,16 @@ def post_to_wordpress(article_data: dict, site_key: str, schedule_dt: datetime =
         if response.status_code in (201, 200):
             post_url = response.json().get('link', '')
             if schedule_dt and schedule_dt > datetime.now():
-                st.success(f"✅ 予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
+                st.success(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
             else:
-                st.success(f"✅ 投稿成功 ({site_key}): {post_url}")
+                st.success(f"投稿成功 ({site_key}): {post_url}")
             return post_url
         else:
-            st.error(f"❌ WordPress投稿失敗 ({site_key}): {response.status_code}")
+            st.error(f"WordPress投稿失敗 ({site_key}): {response.status_code}")
             return ""
             
     except Exception as e:
-        st.error(f"❌ WordPress投稿エラー ({site_key}): {e}")
+        st.error(f"WordPress投稿エラー ({site_key}): {e}")
         return ""
 
 def post_to_seesaa(article: dict, category_name: str = None) -> str:
@@ -471,7 +475,7 @@ def post_to_seesaa(article: dict, category_name: str = None) -> str:
             return f"post_id:{post_id}"
             
     except Exception as e:
-        st.error(f"❌ Seesaa投稿エラー: {e}")
+        st.error(f"Seesaa投稿エラー: {e}")
         return ""
 
 def post_to_fc2(article: dict, category_name: str = None) -> str:
@@ -503,7 +507,7 @@ def post_to_fc2(article: dict, category_name: str = None) -> str:
         return f"https://{config['blog_id']}.blog.fc2.com/blog-entry-{post_id}.html"
         
     except Exception as e:
-        st.error(f"❌ FC2投稿エラー: {e}")
+        st.error(f"FC2投稿エラー: {e}")
         return ""
 
 def post_to_livedoor(article: dict, category_name: str = None) -> str:
@@ -541,17 +545,17 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
             except Exception:
                 return ""
         else:
-            st.error(f"❌ livedoor投稿失敗: {response.status_code}")
+            st.error(f"livedoor投稿失敗: {response.status_code}")
             return ""
             
     except Exception as e:
-        st.error(f"❌ livedoor投稿エラー: {e}")
+        st.error(f"livedoor投稿エラー: {e}")
         return ""
 
 def post_to_blogger(article: dict) -> str:
     """Blogger投稿（簡易実装）"""
     # 実装が複雑なため、ここでは簡易版
-    st.warning("⚠️ Blogger投稿は未実装（認証が複雑なため）")
+    st.warning("Blogger投稿は未実装（認証が複雑なため）")
     return ""
 
 # ========================
@@ -593,7 +597,7 @@ def load_sheet_data(project_key):
         return df
         
     except Exception as e:
-        st.error(f"❌ データ読み込みエラー: {e}")
+        st.error(f"データ読み込みエラー: {e}")
         return pd.DataFrame()
 
 def update_sheet_row(project_key, row_data, updates):
@@ -612,14 +616,14 @@ def update_sheet_row(project_key, row_data, updates):
                     if col_name in all_rows[0]:
                         col_idx = all_rows[0].index(col_name) + 1
                         sheet.update_cell(i, col_idx, value)
-                st.success(f"✅ スプレッドシート更新完了: 行{i}")
+                st.success(f"スプレッドシート更新完了: 行{i}")
                 return True
         
-        st.error(f"⚠️ 対象行が見つかりませんでした")
+        st.error(f"対象行が見つかりませんでした")
         return False
         
     except Exception as e:
-        st.error(f"❌ スプレッドシート更新エラー: {e}")
+        st.error(f"スプレッドシート更新エラー: {e}")
         return False
 
 def add_schedule_to_k_column(project_key, row_data, schedule_times):
@@ -652,14 +656,14 @@ def add_schedule_to_k_column(project_key, row_data, schedule_times):
                     sheet.update_cell(i, col_num, schedule_dt.strftime('%Y/%m/%d %H:%M'))
                     col_num += 1
                 
-                st.success(f"✅ K列以降に予約時刻を記録しました: 行{i}")
+                st.success(f"K列以降に予約時刻を記録しました: 行{i}")
                 return True
         
-        st.error(f"⚠️ 対象行が見つかりませんでした")
+        st.error(f"対象行が見つかりませんでした")
         return False
         
     except Exception as e:
-        st.error(f"❌ K列記録エラー: {e}")
+        st.error(f"K列記録エラー: {e}")
         return False
 
 # ========================
@@ -699,36 +703,36 @@ def execute_post(row_data, project_key, schedule_dt=None):
         max_posts = get_max_posts_for_project(project_key, post_target)
         
         if current_counter >= max_posts:
-            st.warning(f"⚠️ 既に{max_posts}記事完了しています")
+            st.warning(f"既に{max_posts}記事完了しています")
             return False
         
         # 記事内容の決定
         if current_counter == max_posts - 1:
             # 最終記事：宣伝URL
-            st.info(f"📊 {max_posts}記事目 → 宣伝URL使用")
+            st.info(f"{max_posts}記事目 → 宣伝URL使用")
             url = row_data.get('宣伝URL', '')
             anchor = row_data.get('アンカーテキスト', project_key)
         else:
             # 1-N記事目：その他リンク
-            st.info(f"📊 {current_counter + 1}記事目 → その他リンク使用")
+            st.info(f"{current_counter + 1}記事目 → その他リンク使用")
             url, anchor = get_other_link()
             if not url:
-                st.error("❌ その他リンクが取得できません")
+                st.error("その他リンクが取得できません")
                 return False
         
         # 記事生成
-        with st.spinner("🧠 記事を生成中..."):
+        with st.spinner("記事を生成中..."):
             theme = row_data.get('テーマ', '') or '金融・投資・資産運用'
             article = generate_article_with_link(theme, url, anchor)
         
-        st.success(f"📝 タイトル: {article['title']}")
-        st.info(f"🔗 使用リンク: {anchor}")
+        st.success(f"タイトル: {article['title']}")
+        st.info(f"使用リンク: {anchor}")
         
         # プラットフォーム別投稿
         posted_urls = []
         platforms = config['platforms']
         
-        with st.spinner("📤 投稿中..."):
+        with st.spinner("投稿中..."):
             if 'wordpress' in platforms:
                 # WordPress投稿（予約投稿対応）
                 for site_key in config.get('wp_sites', []):
@@ -765,7 +769,7 @@ def execute_post(row_data, project_key, schedule_dt=None):
                     posted_urls.append(post_url)
         
         if not posted_urls:
-            st.error("❌ 投稿に失敗しました")
+            st.error("投稿に失敗しました")
             return False
         
         # スプレッドシート更新
@@ -782,16 +786,16 @@ def execute_post(row_data, project_key, schedule_dt=None):
                 updates[row_data.columns[8]] = completion_time  # I列
             
             st.balloons()
-            st.success(f"🎉 {max_posts}記事完了！")
+            st.success(f"{max_posts}記事完了！")
         else:
-            st.success(f"📊 カウンター更新: {new_counter}")
+            st.success(f"カウンター更新: {new_counter}")
         
         update_sheet_row(project_key, row_data, updates)
         
         return True
         
     except Exception as e:
-        st.error(f"❌ 投稿処理エラー: {e}")
+        st.error(f"投稿処理エラー: {e}")
         return False
 
 # ========================
@@ -801,7 +805,7 @@ def main():
     # ヘッダー
     st.markdown("""
     <div class="main-header">
-        <h1>🚀 統合ブログ投稿管理システム</h1>
+        <h1>統合ブログ投稿管理システム</h1>
         <p>全プラットフォーム対応 - WordPress予約投稿 / 非WordPress K列記録</p>
     </div>
     """, unsafe_allow_html=True)
@@ -818,13 +822,13 @@ def main():
     # プロジェクト情報表示
     col1, col2 = st.columns(2)
     with col1:
-        st.info(f"📋 **プロジェクト**: {config['worksheet']}")
-        st.info(f"🔧 **プラットフォーム**: {', '.join(config['platforms'])}")
+        st.info(f"**プロジェクト**: {config['worksheet']}")
+        st.info(f"**プラットフォーム**: {', '.join(config['platforms'])}")
     with col2:
         if config['needs_k_column']:
-            st.warning("⏰ **予約方式**: K列記録 → GitHub Actions実行")
+            st.warning("**予約方式**: K列記録 → GitHub Actions実行")
         else:
-            st.success("⏰ **予約方式**: WordPress予約投稿機能")
+            st.success("**予約方式**: WordPress予約投稿機能")
     
     # データ読み込み
     df = load_sheet_data(project_key)
@@ -833,7 +837,7 @@ def main():
         st.info("未処理のデータがありません")
         return
     
-    st.header("📋 データ一覧")
+    st.header("データ一覧")
     
     # データエディタ
     edited_df = st.data_editor(
@@ -852,13 +856,13 @@ def main():
     )
     
     # 投稿設定
-    st.header("🚀 投稿設定")
+    st.header("投稿設定")
     
     # WordPress以外は予約設定
     if config['needs_k_column']:
         st.markdown("""
         <div class="warning-box">
-        <strong>⚠️ 非WordPressプロジェクト</strong><br>
+        <strong>非WordPressプロジェクト</strong><br>
         予約時刻はK列に記録され、GitHub Actionsで定期実行されます。<br>
         即時投稿と予約投稿を選択できます。
         </div>
@@ -869,7 +873,7 @@ def main():
         
         schedule_times = []
         if enable_schedule:
-            st.subheader("⏰ 予約時刻設定")
+            st.subheader("予約時刻設定")
             schedule_input = st.text_area(
                 "予約時刻（1行につき1件）",
                 placeholder="10:30\n12:15\n14:00",
@@ -896,14 +900,14 @@ def main():
                         st.error(f"無効な時刻形式: {line}")
                 
                 if schedule_times:
-                    st.success(f"📅 予約時刻 {len(schedule_times)}件を設定")
+                    st.success(f"予約時刻 {len(schedule_times)}件を設定")
                     for dt in schedule_times:
                         st.write(f"• {dt.strftime('%H:%M')}")
     else:
         # WordPress予約投稿
         st.markdown("""
         <div class="success-box">
-        <strong>✅ WordPressプロジェクト</strong><br>
+        <strong>WordPressプロジェクト</strong><br>
         WordPressの予約投稿機能を使用します。<br>
         投稿後、WordPress側で指定時刻に自動公開されます。
         </div>
@@ -923,21 +927,21 @@ def main():
             schedule_dt = datetime.combine(schedule_date, schedule_time)
             
             if schedule_dt <= datetime.now():
-                st.warning("⚠️ 予約時刻は現在時刻より後にしてください")
+                st.warning("予約時刻は現在時刻より後にしてください")
                 schedule_dt = None
             else:
-                st.success(f"📅 予約設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
+                st.success(f"予約設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
     
     # 投稿ボタン
     col_a, col_b = st.columns(2)
     
     with col_a:
         if config['needs_k_column'] and enable_schedule:
-            button_text = "📅 K列に予約時刻を記録"
+            button_text = "K列に予約時刻を記録"
         elif not config['needs_k_column'] and enable_schedule:
-            button_text = "📤 予約投稿"
+            button_text = "予約投稿"
         else:
-            button_text = "📤 即時投稿"
+            button_text = "即時投稿"
         
         if st.button(button_text, type="primary", use_container_width=True):
             selected_rows = edited_df[edited_df['選択'] == True]
@@ -956,7 +960,7 @@ def main():
                     else:
                         success = add_schedule_to_k_column(project_key, row.to_dict(), schedule_times)
                         if success:
-                            st.success("✅ K列に予約時刻を記録しました。GitHub Actionsで実行されます。")
+                            st.success("K列に予約時刻を記録しました。GitHub Actionsで実行されます。")
                             time.sleep(2)
                             st.cache_data.clear()
                             st.rerun()
@@ -975,14 +979,14 @@ def main():
                         st.rerun()
     
     with col_b:
-        if st.button("🔄 データ更新", use_container_width=True):
+        if st.button("データ更新", use_container_width=True):
             st.cache_data.clear()
             st.success("データを更新しました")
             st.rerun()
     
     # GitHub Actions情報（非WordPressプロジェクトのみ）
     if config['needs_k_column']:
-        with st.expander("ℹ️ GitHub Actions設定"):
+        with st.expander("GitHub Actions設定"):
             st.code("""
 # .github/workflows/auto_post.yml
 name: Auto Blog Post
@@ -1008,11 +1012,11 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
           # 各プラットフォームの認証情報も追加
-        run: python check_scheduled_posts.py
+        run: python scripts/post_executor.py
             """, language="yaml")
     
     # 説明
-    with st.expander("ℹ️ 使い方"):
+    with st.expander("使い方"):
         st.markdown(f"""
         **プロジェクト: {config['worksheet']}**
         
