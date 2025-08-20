@@ -1,41 +1,26 @@
-name: Auto Blog Post
+name: Auto Blog Post - K Column Scheduler
 
 on:
   schedule:
-    # 30分ごとに予約投稿をチェック
+    # 30分ごとにK列予約投稿をチェック
     - cron: '0,30 * * * *'
   workflow_dispatch:
     inputs:
-      mode:
-        description: '実行モード'
+      window_minutes:
+        description: '実行ウィンドウ（分）'
         required: false
-        default: 'scheduled'
-        type: choice
-        options:
-          - scheduled
-          - immediate
-      project:
-        description: 'プロジェクト名'
+        default: '30'
+        type: string
+      test_mode:
+        description: 'テストモード'
         required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - biggift
-          - arigataya
-          - kaitori_life
-          - osaifu_rescue
-          - kure_kaeru
-          - red_site
-      post_count:
-        description: '投稿数'
-        required: false
-        default: '1'
+        default: false
+        type: boolean
 
 jobs:
-  post:
+  check_scheduled_posts:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     
     steps:
       - name: Checkout repository
@@ -57,87 +42,57 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests gspread oauth2client xmlrpc.client
       
-      - name: Create credentials file
-        run: |
-          echo '${{ secrets.GCP_SERVICE_ACCOUNT }}' > credentials.json
-      
-      - name: Run posting script
+      - name: Run K column scheduled posts checker
         env:
-          PYTHONPATH: ${{ github.workspace }}
-          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
-          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          # Google Sheets認証（JSONを直接環境変数に）
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           
-          # Blogger
-          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
-          BLOGGER_CREDENTIALS: ${{ secrets.BLOGGER_CREDENTIALS }}
-          BLOGGER_TOKEN: ${{ secrets.BLOGGER_TOKEN }}
+          # Gemini API
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
           
-          # livedoor
-          LIVEDOOR_BLOG_NAME: ${{ secrets.LIVEDOOR_BLOG_NAME }}
-          LIVEDOOR_ID: ${{ secrets.LIVEDOOR_ID }}
-          LIVEDOOR_API_KEY: ${{ secrets.LIVEDOOR_API_KEY }}
-          
-          # Seesaa
+          # Seesaa設定
           SEESAA_USERNAME: ${{ secrets.SEESAA_USERNAME }}
           SEESAA_PASSWORD: ${{ secrets.SEESAA_PASSWORD }}
           SEESAA_BLOGID: ${{ secrets.SEESAA_BLOGID }}
           
-          # FC2
+          # FC2設定
           FC2_BLOG_ID: ${{ secrets.FC2_BLOG_ID }}
           FC2_USERNAME: ${{ secrets.FC2_USERNAME }}
           FC2_PASSWORD: ${{ secrets.FC2_PASSWORD }}
           
-          # WordPress各サイト
-          WP_YKIKAKU_URL: ${{ secrets.WP_YKIKAKU_URL }}
-          WP_YKIKAKU_USER: ${{ secrets.WP_YKIKAKU_USER }}
-          WP_YKIKAKU_PASSWORD: ${{ secrets.WP_YKIKAKU_PASSWORD }}
+          # livedoor設定
+          LIVEDOOR_BLOG_NAME: ${{ secrets.LIVEDOOR_BLOG_NAME }}
+          LIVEDOOR_ID: ${{ secrets.LIVEDOOR_ID }}
+          LIVEDOOR_API_KEY: ${{ secrets.LIVEDOOR_API_KEY }}
           
-          WP_EFDLQJTZ_URL: ${{ secrets.WP_EFDLQJTZ_URL }}
-          WP_EFDLQJTZ_USER: ${{ secrets.WP_EFDLQJTZ_USER }}
-          WP_EFDLQJTZ_PASSWORD: ${{ secrets.WP_EFDLQJTZ_PASSWORD }}
+          # Blogger設定
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           
-          WP_SELECTADVANCE_URL: ${{ secrets.WP_SELECTADVANCE_URL }}
-          WP_SELECTADVANCE_USER: ${{ secrets.WP_SELECTADVANCE_USER }}
-          WP_SELECTADVANCE_PASSWORD: ${{ secrets.WP_SELECTADVANCE_PASSWORD }}
-          
-          WP_WELKENRAEDT_URL: ${{ secrets.WP_WELKENRAEDT_URL }}
-          WP_WELKENRAEDT_USER: ${{ secrets.WP_WELKENRAEDT_USER }}
-          WP_WELKENRAEDT_PASSWORD: ${{ secrets.WP_WELKENRAEDT_PASSWORD }}
-          
-          WP_NCEPQVUB_URL: ${{ secrets.WP_NCEPQVUB_URL }}
-          WP_NCEPQVUB_USER: ${{ secrets.WP_NCEPQVUB_USER }}
-          WP_NCEPQVUB_PASSWORD: ${{ secrets.WP_NCEPQVUB_PASSWORD }}
-          
-          WP_KOSAGI_URL: ${{ secrets.WP_KOSAGI_URL }}
-          WP_KOSAGI_USER: ${{ secrets.WP_KOSAGI_USER }}
-          WP_KOSAGI_PASSWORD: ${{ secrets.WP_KOSAGI_PASSWORD }}
-          
-          WP_SELECTAD_URL: ${{ secrets.WP_SELECTAD_URL }}
-          WP_SELECTAD_USER: ${{ secrets.WP_SELECTAD_USER }}
-          WP_SELECTAD_PASSWORD: ${{ secrets.WP_SELECTAD_PASSWORD }}
-          
-          WP_THRONES_URL: ${{ secrets.WP_THRONES_URL }}
-          WP_THRONES_USER: ${{ secrets.WP_THRONES_USER }}
-          WP_THRONES_PASSWORD: ${{ secrets.WP_THRONES_PASSWORD }}
+          # 投稿間隔設定
+          POST_MIN_INTERVAL: '60'
+          POST_MAX_INTERVAL: '120'
           
         run: |
-          MODE="${{ github.event.inputs.mode || 'scheduled' }}"
+          WINDOW_MINUTES="${{ github.event.inputs.window_minutes || '30' }}"
+          TEST_MODE="${{ github.event.inputs.test_mode || 'false' }}"
           
-          if [ "$MODE" = "scheduled" ]; then
-            python scripts/post_executor.py --mode scheduled
+          if [ "$TEST_MODE" = "true" ]; then
+            echo "テストモードで実行中..."
+            python scripts/post_executor.py --window $WINDOW_MINUTES --test
           else
-            PROJECT="${{ github.event.inputs.project || 'all' }}"
-            POST_COUNT="${{ github.event.inputs.post_count || '1' }}"
-            python scripts/post_executor.py --project $PROJECT --count $POST_COUNT
+            echo "K列予約投稿チェック実行中（ウィンドウ: ${WINDOW_MINUTES}分）..."
+            python scripts/post_executor.py --window $WINDOW_MINUTES
           fi
       
-      - name: Upload logs
+      - name: Output execution summary
         if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: posting-logs
-          path: logs/
-          retention-days: 7
+        run: |
+          echo "## 実行結果" >> $GITHUB_STEP_SUMMARY
+          echo "- 実行時刻: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- 対象プロジェクト: ビックギフト（livedoor/blogger）、ありがた屋（seesaa/fc2）" >> $GITHUB_STEP_SUMMARY
+          echo "- 実行ウィンドウ: ${{ github.event.inputs.window_minutes || '30' }}分" >> $GITHUB_STEP_SUMMARY
