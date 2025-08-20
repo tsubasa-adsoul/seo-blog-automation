@@ -34,6 +34,21 @@ try:
 except Exception:
     BLOGGER_AVAILABLE = False
 
+
+# URL正規化ユーティリティ
+def normalize_base_url(u: str) -> str:
+    if not u:
+        return ""
+    u = u.strip()
+    # スキーム付与
+    if not re.match(r'^https?://', u):
+        u = 'https://' + u
+    # 末尾スラッシュ付与
+    if not u.endswith('/'):
+        u += '/'
+    return u
+
+
 # ========================
 # ページ設定
 # ========================
@@ -1361,3 +1376,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
