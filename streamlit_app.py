@@ -643,192 +643,55 @@ URL: {url}
 # ========================
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
                       schedule_dt: datetime = None, enable_eyecatch: bool = True) -> str:
-    """WordPressに投稿（エラー処理強化版）"""
+    # 既存のpost_to_wordpress関数の内容...
+    # （この関数の最後まで既存コードのまま）
+
+# ⭐ ここに追加 ⭐
+def test_wordpress_connection(site_key):
+    """WordPress接続テスト関数"""
     if site_key not in WP_CONFIGS:
-        st.error(f"不明なサイト: {site_key}")
-        return ""
+        st.error(f"設定が見つかりません: {site_key}")
+        return False
     
-    site_config = WP_CONFIGS[site_key]
+    config = WP_CONFIGS[site_key]
+    test_url = f"{config['url']}wp-json/wp/v2/users/me"
     
-    # 無効化されたサイトをスキップ
-    if site_config.get('disabled', False):
-        st.warning(f"{site_key}は現在無効化されています（サーバー問題のため）")
-        return ""
-    
-    # kosagiの特別処理（XMLRPC方式）
-    if site_key == 'kosagi':
-        if schedule_dt and schedule_dt > datetime.now():
-            # kosagiは予約投稿非対応のため、Python側で待機
-            wait_seconds = (schedule_dt - datetime.now()).total_seconds()
-            st.info(f"kosagi用: {schedule_dt.strftime('%H:%M')}まで待機します（{int(wait_seconds)}秒）")
-            
-            # プログレスバーで待機時間を表示
-            progress_bar = st.progress(0)
-            for i in range(int(wait_seconds)):
-                progress_bar.progress((i + 1) / wait_seconds)
-                time.sleep(1)
-            
-            st.success("予約時刻になりました。kosagiに投稿を開始します")
+    try:
+        st.info(f"🔍 {site_key} 接続テスト中...")
+        response = requests.get(
+            test_url,
+            auth=HTTPBasicAuth(config['user'], config['password']),
+            timeout=10,
+            verify=False  # SSL証明書検証を無効化
+        )
         
-        # XMLRPC方式で投稿
-        endpoint = f"{site_config['url']}xmlrpc.php"
+        st.write(f"**ステータスコード**: {response.status_code}")
         
-        import html
-        escaped_title = html.escape(article_data['title'])
-        
-        xml_request = f"""<?xml version="1.0" encoding="UTF-8"?>
-<methodCall>
-    <methodName>wp.newPost</methodName>
-    <params>
-        <param><value><int>0</int></value></param>
-        <param><value><string>{site_config['user']}</string></value></param>
-        <param><value><string>{site_config['password']}</string></value></param>
-        <param>
-            <value>
-                <struct>
-                    <member>
-                        <name>post_type</name>
-                        <value><string>post</string></value>
-                    </member>
-                    <member>
-                        <name>post_status</name>
-                        <value><string>publish</string></value>
-                    </member>
-                    <member>
-                        <name>post_title</name>
-                        <value><string>{escaped_title}</string></value>
-                    </member>
-                    <member>
-                        <name>post_content</name>
-                        <value><string><![CDATA[{article_data['content']}]]></string></value>
-                    </member>
-                    <member>
-                        <name>terms_names</name>
-                        <value>
-                            <struct>
-                                <member>
-                                    <name>category</name>
-                                    <value>
-                                        <array>
-                                            <data>
-                                                <value><string>{category_name if category_name else 'お金のマメ知識'}</string></value>
-                                            </data>
-                                        </array>
-                                    </value>
-                                </member>
-                            </struct>
-                        </value>
-                    </member>
-                </struct>
-            </value>
-        </param>
-    </params>
-</methodCall>"""
-        
-        try:
-            response = requests.post(
-                endpoint,
-                data=xml_request.encode('utf-8'),
-                headers={
-                    'Content-Type': 'text/xml; charset=UTF-8',
-                    'User-Agent': 'WordPress XML-RPC Client'
-                },
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                if '<name>faultCode</name>' in response.text:
-                    st.error("kosagi XMLRPC投稿エラー")
-                    return ""
-                
-                import re
-                match = re.search(r'<string>(\d+)</string>', response.text)
-                if match:
-                    post_id = match.group(1)
-                    post_url = f"{site_config['url']}?p={post_id}"
-                    st.success(f"kosagi投稿成功 (XMLRPC): {post_url}")
-                    return post_url
-                else:
-                    st.success(f"kosagi投稿成功 (XMLRPC)")
-                    return f"{site_config['url']}"
-            else:
-                st.error(f"kosagi投稿失敗: {response.status_code}")
-                return ""
-                
-        except Exception as e:
-            st.error(f"kosagi投稿エラー: {e}")
-            return ""
-    
-    # 他のサイト（通常のWordPress REST API）
-    else:
-        # アイキャッチ画像を生成・アップロード（kosagiを除く）
-        featured_media_id = None
-        if enable_eyecatch:
-            try:
-                with st.spinner("アイキャッチ画像を生成中..."):
-                    image_data = create_eyecatch_image(article_data['title'], site_key)
-                    image_filename = f"{generate_slug_from_title(article_data['title'])}.jpg"
-                    featured_media_id = upload_image_to_wordpress(image_data, image_filename, site_config)
-                    
-                    if featured_media_id:
-                        st.success("アイキャッチ画像設定完了")
-                    else:
-                        st.warning("アイキャッチ画像の設定をスキップして記事投稿を続行")
-                        
-            except Exception as e:
-                st.warning(f"アイキャッチ画像生成エラー: {e}")
-        
-        endpoint = f"{site_config['url']}wp-json/wp/v2/posts"
-        
-        # カテゴリーIDを取得
-        category_id = get_category_id(site_config, category_name) if category_name else None
-        
-        # スラッグ生成
-        slug = generate_slug_from_title(article_data['title'])
-        
-        post_data = {
-            'title': article_data['title'],
-            'content': article_data['content'],
-            'slug': slug,
-            'categories': [category_id] if category_id else []
-        }
-        
-        # アイキャッチ画像を設定
-        if featured_media_id:
-            post_data['featured_media'] = featured_media_id
-        
-        # 予約投稿の設定（WordPressの機能を使用）
-        if schedule_dt and schedule_dt > datetime.now():
-            post_data['status'] = 'future'
-            post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
-            st.info(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
+        if response.status_code == 200:
+            st.success(f"✅ {site_key} 接続成功")
+            user_data = response.json()
+            st.write(f"**ユーザー名**: {user_data.get('name', 'N/A')}")
+            st.write(f"**権限**: {user_data.get('roles', 'N/A')}")
+            return True
+        elif response.status_code == 403:
+            st.error(f"❌ {site_key} アクセス拒否 (403)")
+            st.write("**考えられる原因**:")
+            st.write("- セキュリティプラグインによるブロック")
+            st.write("- WAF（Web Application Firewall）による制限")
+            st.write("- REST API が無効化されている")
+            st.write("- IP制限がかかっている")
+        elif response.status_code == 401:
+            st.error(f"❌ {site_key} 認証失敗 (401)")
+            st.write("**原因**: ユーザー名またはパスワードが間違っています")
         else:
-            post_data['status'] = 'publish'
+            st.error(f"❌ {site_key} 接続失敗 ({response.status_code})")
         
-        try:
-            response = requests.post(
-                endpoint,
-                auth=HTTPBasicAuth(site_config['user'], site_config['password']),
-                headers={'Content-Type': 'application/json'},
-                data=json.dumps(post_data),
-                timeout=60,
-                verify=False  # SSL証明書の検証を無効化（一時的な回避策）
-            )
-            
-            if response.status_code in (201, 200):
-                post_url = response.json().get('link', '')
-                if schedule_dt and schedule_dt > datetime.now():
-                    st.success(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
-                else:
-                    st.success(f"投稿成功 ({site_key}): {post_url}")
-                return post_url
-            else:
-                st.error(f"WordPress投稿失敗 ({site_key}): {response.status_code}")
-                return ""
-                
-        except Exception as e:
-            st.error(f"WordPress投稿エラー ({site_key}): {e}")
-            return ""
+        st.write(f"**レスポンス内容**: {response.text[:500]}...")
+        return False
+        
+    except Exception as e:
+        st.error(f"❌ {site_key} 接続エラー: {e}")
+        return False
 
 def get_category_id(site_config, category_name):
     """カテゴリー名からIDを取得"""
@@ -1621,6 +1484,7 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
 
 
