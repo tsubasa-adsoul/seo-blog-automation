@@ -649,11 +649,32 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
         return ""
     
     site_config = WP_CONFIGS[site_key]
-    
+
+# ⭐ ここに追加 ⭐
+def test_wordpress_connection(site_key):
+    """WordPress
+                        
     # 無効化されたサイトをスキップ
     if site_config.get('disabled', False):
         st.warning(f"{site_key}は現在無効化されています（サーバー問題のため）")
         return ""
+
+    # User-Agentヘッダーを追加（ykikaku用）
+    headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'WordPress/6.0; https://ykikaku.xsrv.jp'  # ykikaku特別対応
+    }
+    
+    try:
+        response = requests.post(
+            endpoint,
+            auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+            headers=headers,  # ← ここで追加
+            data=json.dumps(post_data),
+            timeout=60,
+            verify=False
+        )
+    
     
     # kosagiの特別処理（XMLRPC方式）
     if site_key == 'kosagi':
@@ -1698,6 +1719,7 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
 
 
