@@ -763,46 +763,6 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             if "Failed to resolve" in str(e):
                 st.info(f"💡 {site_key}への接続に問題があります。Streamlit Cloud環境のネットワーク問題の可能性があります。")
             return ""
-    
-    # 他のサイト（通常のWordPress REST API）
-    else:
-        endpoint = f"{site_config['url']}wp-json/wp/v2/posts"
-        
-        post_data = {
-            'title': article_data['title'],
-            'content': article_data['content'],
-            'status': 'publish'
-        }
-        
-        # 予約投稿の設定
-        if schedule_dt and schedule_dt > datetime.now():
-            post_data['status'] = 'future'
-            post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
-            st.info(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}")
-        
-        try:
-            response = requests.post(
-                endpoint,
-                auth=HTTPBasicAuth(site_config['user'], site_config['password']),
-                headers={'Content-Type': 'application/json'},
-                data=json.dumps(post_data),
-                timeout=60
-            )
-            
-            if response.status_code in (201, 200):
-                post_url = response.json().get('link', '')
-                if schedule_dt and schedule_dt > datetime.now():
-                    st.success(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
-                else:
-                    st.success(f"投稿成功 ({site_key}): {post_url}")
-                return post_url
-            else:
-                st.error(f"WordPress投稿失敗 ({site_key}): {response.status_code}")
-                return ""
-                
-        except Exception as e:
-            st.error(f"WordPress投稿エラー ({site_key}): {e}")
-            return ""
 
 # ========================
 # ユーティリティ関数
@@ -1418,4 +1378,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
