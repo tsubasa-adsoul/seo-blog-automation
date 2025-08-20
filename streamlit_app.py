@@ -116,7 +116,7 @@ WP_CONFIGS = {
     'kosagi': {
         'url': 'https://www.kosagi.biz/',
         'user': 'kosagi',
-        'password': 'VsGS VU5J cKx8 HM6p oLEb VdNH'
+        'password': 'K2DZ ERIy aTLb K2Z0 gHi6 XdIN'
     },
     'selectad': {
         'url': 'https://selectad.v2006.coreserver.jp/',
@@ -1830,6 +1830,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
