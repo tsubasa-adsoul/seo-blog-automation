@@ -205,18 +205,28 @@ st.markdown("""
         border-radius: 8px;
         margin: 1rem 0;
     }
-    .completion-modal {
-        background: #f8f9fa;
-        border: 2px solid #28a745;
-        border-radius: 10px;
-        padding: 2rem;
+    .error-box {
+        background: #f8d7da;
+        border: 1px solid #dc3545;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 8px;
         margin: 1rem 0;
+    }
+    .notification-container {
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        background: white;
+        padding: 1rem;
+        border-bottom: 1px solid #ddd;
+        margin-bottom: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ========================
-# セッションステート初期化（プロジェクト別対応）
+# セッションステート初期化（プロジェクト別対応・通知システム追加）
 # ========================
 if 'gemini_key_index' not in st.session_state:
     st.session_state.gemini_key_index = 0
@@ -235,6 +245,103 @@ if 'all_posted_urls' not in st.session_state:
 
 if 'completion_results' not in st.session_state:
     st.session_state.completion_results = {}  # 完了結果保存
+
+if 'persistent_notifications' not in st.session_state:
+    st.session_state.persistent_notifications = []  # 永続通知
+
+if 'notification_counter' not in st.session_state:
+    st.session_state.notification_counter = 0
+
+# ========================
+# 永続通知システム
+# ========================
+def add_notification(message, notification_type="info", project_key=None):
+    """永続通知を追加"""
+    st.session_state.notification_counter += 1
+    
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    notification = {
+        'id': st.session_state.notification_counter,
+        'timestamp': timestamp,
+        'message': message,
+        'type': notification_type,  # success, error, warning, info
+        'project_key': project_key,
+        'created_at': datetime.now()
+    }
+    
+    st.session_state.persistent_notifications.append(notification)
+    
+    # 古い通知を削除（最新30件まで保持）
+    if len(st.session_state.persistent_notifications) > 30:
+        st.session_state.persistent_notifications = st.session_state.persistent_notifications[-25:]
+
+def show_notifications():
+    """永続通知を表示"""
+    if not st.session_state.persistent_notifications:
+        return
+    
+    st.markdown('<div class="notification-container">', unsafe_allow_html=True)
+    st.markdown("### 📢 通知一覧")
+    
+    # 最新5件の通知を表示
+    recent_notifications = st.session_state.persistent_notifications[-5:]
+    
+    for notification in reversed(recent_notifications):
+        timestamp = notification['timestamp']
+        message = notification['message']
+        ntype = notification['type']
+        project = notification.get('project_key', '')
+        
+        if ntype == "success":
+            icon = "✅"
+            css_class = "success-box"
+        elif ntype == "error":
+            icon = "❌"
+            css_class = "error-box"
+        elif ntype == "warning":
+            icon = "⚠️"
+            css_class = "warning-box"
+        else:
+            icon = "ℹ️"
+            css_class = "success-box"
+        
+        project_text = f"[{project}] " if project else ""
+        
+        st.markdown(f"""
+        <div class="{css_class}">
+            <strong>{icon} {timestamp}</strong> {project_text}{message}
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # 全通知表示ボタン
+    if len(st.session_state.persistent_notifications) > 5:
+        with st.expander(f"全通知を表示 ({len(st.session_state.persistent_notifications)}件)"):
+            for notification in reversed(st.session_state.persistent_notifications):
+                timestamp = notification['timestamp']
+                message = notification['message']
+                ntype = notification['type']
+                project = notification.get('project_key', '')
+                
+                if ntype == "success":
+                    icon = "✅"
+                elif ntype == "error":
+                    icon = "❌"
+                elif ntype == "warning":
+                    icon = "⚠️"
+                else:
+                    icon = "ℹ️"
+                
+                project_text = f"[{project}] " if project else ""
+                st.write(f"{icon} **{timestamp}** {project_text}{message}")
+    
+    # 通知クリアボタン
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("🗑️ 通知クリア", key="clear_notifications"):
+            st.session_state.persistent_notifications = []
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ========================
 # 認証 & シート取得
@@ -258,7 +365,7 @@ def get_sheets_client():
             os.unlink(temp_path)
             return gspread.authorize(creds)
     
-    st.error("Google認証情報が設定されていません。Secretsの[gcp]セクションを確認してください。")
+    add_notification("Google認証情報が設定されていません。Secretsの[gcp]セクションを確認してください。", "error")
     st.stop()
 
 # ========================
@@ -415,11 +522,11 @@ URL: {url}
         }
         
     except Exception as e:
-        st.error(f"記事生成エラー: {e}")
+        add_notification(f"記事生成エラー: {str(e)}", "error")
         raise
 
 # ========================
-# 各プラットフォーム投稿関数
+# 各プラットフォーム投稿関数（通知システム対応）
 # ========================
 
 # リンク属性強制付与関数（EXE版から移植）
@@ -443,13 +550,15 @@ def enforce_anchor_attrs(html: str) -> str:
         return tag
     return re.sub(r'<a\s+[^>]*>', add_attrs, html, flags=re.I)
 
-def post_to_seesaa(article: dict, category_name: str = None) -> str:
-    """Seesaa投稿"""
+def post_to_seesaa(article: dict, category_name: str = None, project_key: str = None) -> str:
+    """Seesaa投稿（通知システム対応）"""
     config = PLATFORM_CONFIGS['seesaa']
     server = xmlrpc.client.ServerProxy(config['endpoint'], allow_none=True)
     content = {"title": article["title"], "description": article["content"]}
     
     try:
+        add_notification("Seesaa投稿を開始します", "info", project_key)
+        
         post_id = server.metaWeblog.newPost(
             config['blogid'], 
             config['username'], 
@@ -468,26 +577,32 @@ def post_to_seesaa(article: dict, category_name: str = None) -> str:
                             [{"categoryId": c.get("categoryId"), "isPrimary": True}]
                         )
                         break
-            except Exception:
-                pass
+            except Exception as cat_error:
+                add_notification(f"Seesaaカテゴリ設定エラー: {str(cat_error)}", "warning", project_key)
         
         try:
             post = server.metaWeblog.getPost(post_id, config['username'], config['password'])
-            return post.get("permalink") or post.get("link") or ""
+            post_url = post.get("permalink") or post.get("link") or ""
+            if post_url:
+                add_notification(f"Seesaa投稿成功: {post_url}", "success", project_key)
+            return post_url
         except Exception:
+            add_notification(f"Seesaa投稿成功 (post_id: {post_id})", "success", project_key)
             return f"post_id:{post_id}"
             
     except Exception as e:
-        st.error(f"Seesaa投稿エラー: {e}")
+        add_notification(f"Seesaa投稿エラー: {str(e)}", "error", project_key)
         return ""
 
-def post_to_fc2(article: dict, category_name: str = None) -> str:
-    """FC2投稿"""
+def post_to_fc2(article: dict, category_name: str = None, project_key: str = None) -> str:
+    """FC2投稿（通知システム対応）"""
     config = PLATFORM_CONFIGS['fc2']
     server = xmlrpc.client.ServerProxy(config['endpoint'])
     content = {'title': article['title'], 'description': article['content']}
     
     try:
+        add_notification("FC2投稿を開始します", "info", project_key)
+        
         post_id = server.metaWeblog.newPost(
             config['blog_id'], 
             config['username'], 
@@ -503,20 +618,24 @@ def post_to_fc2(article: dict, category_name: str = None) -> str:
                     if c.get('categoryName') == category_name:
                         server.mt.setPostCategories(post_id, config['username'], config['password'], [c])
                         break
-            except Exception:
-                pass
+            except Exception as cat_error:
+                add_notification(f"FC2カテゴリ設定エラー: {str(cat_error)}", "warning", project_key)
         
-        return f"https://{config['blog_id']}.blog.fc2.com/blog-entry-{post_id}.html"
+        post_url = f"https://{config['blog_id']}.blog.fc2.com/blog-entry-{post_id}.html"
+        add_notification(f"FC2投稿成功: {post_url}", "success", project_key)
+        return post_url
         
     except Exception as e:
-        st.error(f"FC2投稿エラー: {e}")
+        add_notification(f"FC2投稿エラー: {str(e)}", "error", project_key)
         return ""
 
-def post_to_livedoor(article: dict, category_name: str = None) -> str:
-    """livedoor投稿（EXE版から移植）"""
+def post_to_livedoor(article: dict, category_name: str = None, project_key: str = None) -> str:
+    """livedoor投稿（通知システム対応）"""
     config = PLATFORM_CONFIGS['livedoor']
     root = f"https://livedoor.blogcms.jp/atompub/{config['blog_name']}"
     endpoint = f"{root}/article"
+    
+    add_notification("livedoor投稿を開始します", "info", project_key)
     
     title_xml = xml_escape(article["title"])
     safe_html = enforce_anchor_attrs(article["content"])
@@ -544,28 +663,35 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
                 root_xml = ET.fromstring(response.text)
                 ns = {"atom": "http://www.w3.org/2005/Atom"}
                 alt = root_xml.find(".//atom:link[@rel='alternate']", ns)
-                return alt.get("href") if alt is not None else ""
-            except Exception:
+                if alt is not None:
+                    post_url = alt.get("href")
+                    add_notification(f"livedoor投稿成功: {post_url}", "success", project_key)
+                    return post_url
+                else:
+                    add_notification("livedoor投稿成功 (URLの取得に失敗)", "success", project_key)
+                    return ""
+            except Exception as parse_error:
+                add_notification(f"livedoor投稿成功 (レスポンス解析エラー: {str(parse_error)})", "warning", project_key)
                 return ""
         else:
-            st.error(f"livedoor投稿失敗: {response.status_code}")
+            add_notification(f"livedoor投稿失敗: HTTP {response.status_code} - {response.text[:200]}", "error", project_key)
             return ""
             
     except Exception as e:
-        st.error(f"livedoor投稿エラー: {e}")
+        add_notification(f"livedoor投稿エラー: {str(e)}", "error", project_key)
         return ""
 
-def post_to_blogger(article: dict) -> str:
-    """Blogger投稿（完全実装）"""
+def post_to_blogger(article: dict, project_key: str = None) -> str:
+    """Blogger投稿（通知システム対応）"""
     if not BLOGGER_AVAILABLE:
-        st.error("Blogger投稿に必要なライブラリがインストールされていません")
+        add_notification("Blogger投稿に必要なライブラリがインストールされていません", "error", project_key)
         return ""
     
     BLOG_ID = os.environ.get('BLOGGER_BLOG_ID', '3943718248369040188')
     SCOPES = ['https://www.googleapis.com/auth/blogger']
     
     try:
-        st.info("📤 Blogger認証処理開始...")
+        add_notification("Blogger認証処理を開始します", "info", project_key)
         
         creds = None
         token_file = '/tmp/blogger_token.pickle'
@@ -578,17 +704,17 @@ def post_to_blogger(article: dict) -> str:
         # 認証情報の検証・更新
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                st.info("🔄 Bloggerトークンを更新中...")
+                add_notification("Bloggerトークンを更新中...", "info", project_key)
                 creds.refresh(Request())
             else:
-                st.error("🆕 Blogger初回認証が必要です。Streamlit環境では自動認証できません。")
+                add_notification("Blogger初回認証が必要です。Streamlit環境では自動認証できません。", "error", project_key)
                 return ""
             
             # トークンを保存
             with open(token_file, 'wb') as token:
                 pickle.dump(creds, token)
         
-        st.success("✅ Blogger認証成功")
+        add_notification("Blogger認証成功", "success", project_key)
         
         # Blogger APIサービスを構築
         service = build('blogger', 'v3', credentials=creds)
@@ -600,7 +726,7 @@ def post_to_blogger(article: dict) -> str:
             'labels': [article.get('theme', '金融')]
         }
         
-        st.info(f"📝 Blogger投稿実行: {article['title']}")
+        add_notification(f"Blogger投稿実行: {article['title'][:30]}...", "info", project_key)
         
         # 投稿を実行
         response = service.posts().insert(
@@ -611,21 +737,21 @@ def post_to_blogger(article: dict) -> str:
         
         if response and 'url' in response:
             post_url = response['url']
-            st.success(f"✅ Blogger投稿成功: {post_url}")
+            add_notification(f"Blogger投稿成功: {post_url}", "success", project_key)
             return post_url
         else:
-            st.error("❌ Blogger投稿失敗: レスポンスにURLが含まれていません")
+            add_notification("Blogger投稿失敗: レスポンスにURLが含まれていません", "error", project_key)
             return ""
             
     except Exception as e:
-        st.error(f"❌ Blogger投稿エラー: {e}")
+        add_notification(f"Blogger投稿エラー: {str(e)}", "error", project_key)
         return ""
 
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
-                      schedule_dt: datetime = None, enable_eyecatch: bool = True) -> str:
-    """WordPressに投稿（予約投稿対応・kosagi特別処理）"""
+                      schedule_dt: datetime = None, enable_eyecatch: bool = True, project_key: str = None) -> str:
+    """WordPressに投稿（通知システム対応）"""
     if site_key not in WP_CONFIGS:
-        st.error(f"不明なサイト: {site_key}")
+        add_notification(f"不明なサイト: {site_key}", "error", project_key)
         return ""
     
     site_config = WP_CONFIGS[site_key]
@@ -634,7 +760,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
     if site_key == 'kosagi':
         if schedule_dt and schedule_dt > datetime.now():
             wait_seconds = (schedule_dt - datetime.now()).total_seconds()
-            st.info(f"kosagi用: {schedule_dt.strftime('%Y/%m/%d %H:%M')}まで待機します（{int(wait_seconds)}秒）")
+            add_notification(f"kosagi用: {schedule_dt.strftime('%Y/%m/%d %H:%M')}まで待機します（{int(wait_seconds)}秒）", "info", project_key)
             
             progress_bar = st.progress(0)
             total_seconds = int(wait_seconds)
@@ -643,7 +769,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 progress_bar.progress((i + 1) / total_seconds)
                 time.sleep(1)
             
-            st.success("予約時刻になりました。kosagiに投稿を開始します")
+            add_notification("予約時刻になりました。kosagiに投稿を開始します", "success", project_key)
         
         # XMLRPC方式で即時投稿
         endpoint = f"{site_config['url']}xmlrpc.php"
@@ -684,6 +810,8 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
 </methodCall>"""
         
         try:
+            add_notification(f"kosagi XMLRPC投稿を開始します", "info", project_key)
+            
             response = requests.post(
                 endpoint,
                 data=xml_request.encode('utf-8'),
@@ -696,24 +824,24 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             
             if response.status_code == 200:
                 if '<name>faultCode</name>' in response.text:
-                    st.error("kosagi XMLRPC投稿エラー")
+                    add_notification(f"kosagi XMLRPC投稿エラー: {response.text[:300]}", "error", project_key)
                     return ""
                 
                 match = re.search(r'<string>(\d+)</string>', response.text)
                 if match:
                     post_id = match.group(1)
                     post_url = f"{site_config['url']}?p={post_id}"
-                    st.success(f"kosagi投稿成功 (XMLRPC): {post_url}")
+                    add_notification(f"kosagi投稿成功 (XMLRPC): {post_url}", "success", project_key)
                     return post_url
                 else:
-                    st.success(f"kosagi投稿成功 (XMLRPC)")
+                    add_notification(f"kosagi投稿成功 (XMLRPC)", "success", project_key)
                     return f"{site_config['url']}"
             else:
-                st.error(f"kosagi投稿失敗: {response.status_code}")
+                add_notification(f"kosagi投稿失敗: HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
                 return ""
                 
         except Exception as e:
-            st.error(f"kosagi投稿エラー: {e}")
+            add_notification(f"kosagi投稿エラー: {str(e)}", "error", project_key)
             return ""
     
     # 他のサイト（通常のWordPress REST API）
@@ -730,9 +858,11 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
         if schedule_dt and schedule_dt > datetime.now():
             post_data['status'] = 'future'
             post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
-            st.info(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
+            add_notification(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定", "info", project_key)
         
         try:
+            add_notification(f"{site_key} REST API投稿を開始します", "info", project_key)
+            
             # リトライ機能付きでリクエスト
             import urllib3
             from urllib3.util.retry import Retry
@@ -759,16 +889,16 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             if response.status_code in (201, 200):
                 post_url = response.json().get('link', '')
                 if schedule_dt and schedule_dt > datetime.now():
-                    st.success(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定")
+                    add_notification(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定", "success", project_key)
                 else:
-                    st.success(f"投稿成功 ({site_key}): {post_url}")
+                    add_notification(f"投稿成功 ({site_key}): {post_url}", "success", project_key)
                 return post_url
             else:
-                st.error(f"WordPress投稿失敗 ({site_key}): {response.status_code}")
+                add_notification(f"WordPress投稿失敗 ({site_key}): HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
                 return ""
                 
         except Exception as e:
-            st.error(f"WordPress投稿エラー ({site_key}): {e}")
+            add_notification(f"WordPress投稿エラー ({site_key}): {str(e)}", "error", project_key)
             return ""
 
 # ========================
@@ -862,7 +992,7 @@ def load_sheet_data(project_key):
         return df
         
     except Exception as e:
-        st.error(f"データ読み込みエラー: {e}")
+        add_notification(f"データ読み込みエラー: {str(e)}", "error")
         return pd.DataFrame()
 
 def update_sheet_row(project_key, row_data, updates):
@@ -885,13 +1015,16 @@ def update_sheet_row(project_key, row_data, updates):
                         time.sleep(0.5)
                 
                 add_realtime_log(f"✅ スプレッドシート更新完了: 行{i}", project_key)
+                add_notification(f"スプレッドシート更新完了: 行{i}", "success", project_key)
                 return True
         
         add_realtime_log(f"❌ 対象行が見つかりませんでした", project_key)
+        add_notification("対象行が見つかりませんでした", "error", project_key)
         return False
         
     except Exception as e:
         add_realtime_log(f"❌ スプレッドシート更新エラー: {e}", project_key)
+        add_notification(f"スプレッドシート更新エラー: {str(e)}", "error", project_key)
         return False
 
 def add_schedule_to_k_column(project_key, row_data, schedule_times):
@@ -920,21 +1053,21 @@ def add_schedule_to_k_column(project_key, row_data, schedule_times):
                     sheet.update_cell(i, col_num, schedule_dt.strftime('%Y/%m/%d %H:%M'))
                     col_num += 1
                 
-                st.success(f"K列以降に予約時刻を記録しました: 行{i}")
+                add_notification(f"K列以降に予約時刻を記録しました: 行{i}", "success", project_key)
                 return True
         
-        st.error(f"対象行が見つかりませんでした")
+        add_notification("対象行が見つかりませんでした", "error", project_key)
         return False
         
     except Exception as e:
-        st.error(f"K列記録エラー: {e}")
+        add_notification(f"K列記録エラー: {str(e)}", "error", project_key)
         return False
 
 # ========================
-# 投稿処理（完全版・プロジェクト別ログ・スプシ更新修正）
+# 投稿処理（完全版・プロジェクト別ログ・スプシ更新修正・通知システム対応）
 # ========================
 def execute_post(row_data, project_key, post_count=1, schedule_times=None, enable_eyecatch=True):
-    """投稿実行（完全版・プロジェクト別ログ・スプシ更新修正）"""
+    """投稿実行（完全版・プロジェクト別ログ・スプシ更新修正・通知システム対応）"""
     try:
         st.session_state.posting_projects.add(project_key)
         
@@ -945,6 +1078,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
             st.session_state.all_posted_urls[project_key] = []
         
         add_realtime_log(f"📋 {PROJECT_CONFIGS[project_key]['worksheet']} の投稿開始", project_key)
+        add_notification(f"{PROJECT_CONFIGS[project_key]['worksheet']} の投稿を開始しました", "info", project_key)
         
         config = PROJECT_CONFIGS[project_key]
         schedule_times = schedule_times or []
@@ -963,7 +1097,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         
         if current_counter >= max_posts:
             add_realtime_log(f"⚠️ 既に{max_posts}記事完了済み", project_key)
-            st.warning(f"既に{max_posts}記事完了しています")
+            add_notification(f"既に{max_posts}記事完了しています", "warning", project_key)
+            st.session_state.posting_projects.discard(project_key)
             return False
         
         posts_completed = 0
@@ -974,7 +1109,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
         for i in range(post_count):
             if current_counter >= max_posts:
                 add_realtime_log(f"⚠️ カウンター{current_counter}: 既に{max_posts}記事完了済み", project_key)
-                st.warning(f"カウンター{current_counter}: 既に{max_posts}記事完了済み")
+                add_notification(f"カウンター{current_counter}: 既に{max_posts}記事完了済み", "warning", project_key)
                 break
             
             schedule_dt = schedule_times[i] if i < len(schedule_times) else None
@@ -996,7 +1131,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                         url, anchor = get_other_link()
                         if not url:
                             add_realtime_log("❌ その他リンクが取得できません", project_key)
-                            st.error("その他リンクが取得できません")
+                            add_notification("その他リンクが取得できません", "error", project_key)
                             break
                         category = 'お金のマメ知識'
                     
@@ -1023,7 +1158,8 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                     site_key, 
                                     category, 
                                     schedule_dt, 
-                                    enable_eyecatch
+                                    enable_eyecatch,
+                                    project_key
                                 )
                                 if post_url:
                                     posted_urls.append(post_url)
@@ -1031,35 +1167,35 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     
                     elif 'seesaa' in platforms:
                         add_realtime_log("📤 Seesaaに投稿中...", project_key)
-                        post_url = post_to_seesaa(article, category)
+                        post_url = post_to_seesaa(article, category, project_key)
                         if post_url:
                             posted_urls.append(post_url)
                             add_realtime_log(f"✅ Seesaa投稿成功: {post_url}", project_key)
                     
                     elif 'fc2' in platforms:
                         add_realtime_log("📤 FC2に投稿中...", project_key)
-                        post_url = post_to_fc2(article, category)
+                        post_url = post_to_fc2(article, category, project_key)
                         if post_url:
                             posted_urls.append(post_url)
                             add_realtime_log(f"✅ FC2投稿成功: {post_url}", project_key)
                     
                     elif 'livedoor' in platforms:
                         add_realtime_log("📤 livedoorに投稿中...", project_key)
-                        post_url = post_to_livedoor(article, category)
+                        post_url = post_to_livedoor(article, category, project_key)
                         if post_url:
                             posted_urls.append(post_url)
                             add_realtime_log(f"✅ livedoor投稿成功: {post_url}", project_key)
                     
                     elif 'blogger' in platforms:
                         add_realtime_log("📤 Bloggerに投稿中...", project_key)
-                        post_url = post_to_blogger(article)
+                        post_url = post_to_blogger(article, project_key)
                         if post_url:
                             posted_urls.append(post_url)
                             add_realtime_log(f"✅ Blogger投稿成功: {post_url}", project_key)
                     
                     if not posted_urls:
                         add_realtime_log("❌ 投稿に失敗しました", project_key)
-                        st.error("投稿に失敗しました")
+                        add_notification("投稿に失敗しました", "error", project_key)
                         break
                     
                     # 全投稿URLを記録
@@ -1106,6 +1242,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 time.sleep(0.5)
                                 
                                 add_realtime_log(f"🎉 {max_posts}記事完了！スプレッドシート更新完了", project_key)
+                                add_notification(f"{max_posts}記事完了！プロジェクト完了しました", "success", project_key)
                                 
                                 # 完了結果を保存（消えないように）
                                 st.session_state.completion_results[project_key] = {
@@ -1122,7 +1259,7 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                                 return True
                             else:
                                 add_realtime_log(f"✅ カウンター更新: {current_counter}", project_key)
-                                st.success(f"カウンター更新: {current_counter}")
+                                add_notification(f"カウンター更新: {current_counter}/{max_posts}", "success", project_key)
                             break
                     
                     progress_bar.progress(posts_completed / post_count)
@@ -1135,25 +1272,28 @@ def execute_post(row_data, project_key, post_count=1, schedule_times=None, enabl
                     
                 except Exception as e:
                     add_realtime_log(f"❌ 記事{i+1}の投稿エラー: {e}", project_key)
-                    st.error(f"記事{i+1}の投稿エラー: {e}")
+                    add_notification(f"記事{i+1}の投稿エラー: {str(e)}", "error", project_key)
                     st.session_state.posting_projects.discard(project_key)
                     break
         
         st.session_state.posting_projects.discard(project_key)
         add_realtime_log(f"✅ {posts_completed}記事の投稿が完了しました", project_key)
-        st.success(f"{posts_completed}記事の投稿が完了しました")
+        add_notification(f"{posts_completed}記事の投稿が完了しました", "success", project_key)
         return True
         
     except Exception as e:
         st.session_state.posting_projects.discard(project_key)
         add_realtime_log(f"❌ 投稿処理エラー: {e}", project_key)
-        st.error(f"投稿処理エラー: {e}")
+        add_notification(f"投稿処理エラー: {str(e)}", "error", project_key)
         return False
 
 # ========================
-# UI構築（完全版・プロジェクト別表示）
+# UI構築（完全版・プロジェクト別表示・通知システム対応）
 # ========================
 def main():
+    # 通知表示（最上部に固定）
+    show_notifications()
+    
     # ヘッダー
     st.markdown("""
     <div class="main-header">
@@ -1164,7 +1304,7 @@ def main():
     
     # Blogger可用性チェック
     if not BLOGGER_AVAILABLE:
-        st.warning("⚠️ Blogger投稿機能を使用するには、requirements.txtに追加ライブラリが必要です")
+        add_notification("Blogger投稿機能を使用するには、requirements.txtに追加ライブラリが必要です", "warning")
     
     # 完了結果の表示（消えないように）
     if st.session_state.completion_results:
@@ -1334,7 +1474,7 @@ def main():
                             if schedule_dt > now:
                                 schedule_times.append(schedule_dt)
                     except ValueError:
-                        st.error(f"無効な時刻形式: {line}")
+                        add_notification(f"無効な時刻形式: {line}", "error")
                 
                 if schedule_times:
                     st.success(f"予約時刻 {len(schedule_times)}件を設定")
@@ -1387,10 +1527,10 @@ def main():
                         if dt and dt > now:
                             schedule_times.append(dt)
                         elif dt:
-                            st.error(f"過去の時刻は指定できません: {line}")
+                            add_notification(f"過去の時刻は指定できません: {line}", "error")
                             
                     except Exception:
-                        st.error(f"無効な時刻形式: {line}")
+                        add_notification(f"無効な時刻形式: {line}", "error")
                 
                 if schedule_times:
                     st.success(f"予約時刻 {len(schedule_times)}件を設定")
@@ -1412,19 +1552,19 @@ def main():
             selected_rows = edited_df[edited_df['選択'] == True]
             
             if len(selected_rows) == 0:
-                st.error("投稿する行を選択してください")
+                add_notification("投稿する行を選択してください", "error")
             elif len(selected_rows) > 1:
-                st.error("1行のみ選択してください")
+                add_notification("1行のみ選択してください", "error")
             else:
                 row = selected_rows.iloc[0]
                 
                 if config['needs_k_column'] and enable_schedule:
                     if not schedule_times:
-                        st.error("予約時刻を入力してください")
+                        add_notification("予約時刻を入力してください", "error")
                     else:
                         success = add_schedule_to_k_column(project_key, row.to_dict(), schedule_times)
                         if success:
-                            st.success("K列に予約時刻を記録しました。GitHub Actionsで実行されます。")
+                            add_notification("K列に予約時刻を記録しました。GitHub Actionsで実行されます。", "success", project_key)
                             time.sleep(2)
                             st.cache_data.clear()
                             st.rerun()
@@ -1445,7 +1585,7 @@ def main():
     with col_b:
         if st.button("データ更新", use_container_width=True):
             st.cache_data.clear()
-            st.success("データを更新しました")
+            add_notification("データを更新しました", "success")
             st.rerun()
     
     # 情報表示
