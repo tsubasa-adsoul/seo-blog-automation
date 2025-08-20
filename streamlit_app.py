@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape as xml_escape
 import io
 from PIL import Image, ImageDraw, ImageFont
+from scripts.blogger_client import post_to_blogger
 
 # Optional: avoid SSL warning noise (REST verify=False を使うため)
 try:
@@ -1360,3 +1361,4 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
