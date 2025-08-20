@@ -198,6 +198,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ========================
 # セッションステート初期化
 # ========================
@@ -217,13 +218,11 @@ def add_realtime_log(message):
     if len(st.session_state.realtime_logs) > 10:
         st.session_state.realtime_logs.pop(0)
 
+
 # ========================
 # メイン関数
 # ========================
 def main():
-    # セッションステートの初期化
-    init_session_state()
-    
     st.title("SEOブログ自動化ツール")
     st.write("記事を自動生成して複数のプラットフォームに投稿します")
     
@@ -243,7 +242,6 @@ def main():
         format_func=lambda x: project_options[x],
         disabled=st.session_state.get("project_selector", "biggift") in st.session_state.posting_projects,  # 該当プロジェクトのみ無効化
         key="project_selector"
-    )
 
 # ========================
 # 認証 & シート取得
