@@ -789,6 +789,10 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
         add_notification(f"不明なサイト: {site_key}", "error", project_key)
         return ""
     site_config = WP_CONFIGS[site_key]
+    
+    # ベースURLの正規化（末尾スラッシュ確保）
+    base_url = site_config['url'].rstrip('/') + '/'
+    
     # kosagi: XMLRPCで即時 or 待機→即時
     if site_key == 'kosagi':
         if schedule_dt and schedule_dt > datetime.now():
@@ -800,7 +804,8 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 progress_bar.progress((i+1)/total)
                 time.sleep(1)
             add_notification("kosagi投稿開始", "success", project_key)
-        endpoint = f"{site_config['url']}xmlrpc.php"
+        
+        endpoint = f"{base_url}xmlrpc.php"
         import html
         escaped_title = html.escape(article_data['title'])
         xml_request = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -838,29 +843,32 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 match = re.search(r'<string>(\d+)</string>', response.text)
                 if match:
                     post_id = match.group(1)
-                    post_url = f"{site_config['url']}?p={post_id}"
+                    post_url = f"{base_url}?p={post_id}"
                     add_notification(f"kosagi投稿成功: {post_url}", "success", project_key)
                     return post_url
                 add_notification("kosagi投稿成功 (ID抽出失敗)", "success", project_key)
-                return site_config['url']
+                return base_url
             else:
                 add_notification(f"kosagi投稿失敗: HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
                 return ""
         except Exception as e:
             add_notification(f"kosagi投稿エラー: {e}", "error", project_key)
             return ""
-    # 通常WP: REST
-    endpoint = f"{site_config['url']}wp-json/wp/v2/posts"
+    
+    # 通常WP: REST API
+    endpoint = f"{base_url}wp-json/wp/v2/posts"
     post_data = {'title': article_data['title'], 'content': article_data['content'], 'status': 'publish'}
+    
     if schedule_dt and schedule_dt > datetime.now():
         post_data['status'] = 'future'
         post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
         add_notification(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}", "info", project_key)
+    
     if enable_eyecatch:
         try:
             add_notification(f"アイキャッチ生成: {site_key}", "info", project_key)
             eyecatch_data = create_eyecatch_image(article_data['title'], site_key)
-            media_endpoint = f"{site_config['url']}wp-json/wp/v2/media"
+            media_endpoint = f"{base_url}wp-json/wp/v2/media"
             files = {'file': ('eyecatch.jpg', eyecatch_data, 'image/jpeg')}
             media_data = {'title': f"アイキャッチ: {article_data['title'][:30]}...", 'alt_text': article_data['title']}
             media_response = requests.post(media_endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
@@ -873,6 +881,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 add_notification(f"アイキャッチUP失敗 ({site_key}): {media_response.status_code}", "warning", project_key)
         except Exception as e:
             add_notification(f"アイキャッチ処理エラー ({site_key}): {e}", "warning", project_key)
+    
     try:
         add_notification(f"{site_key}投稿開始（REST）", "info", project_key)
         response = requests.post(endpoint, auth=HTTPBasicAuth(site_config['user'], site_config['password']),
@@ -888,7 +897,7 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
                 return post_url
             except Exception as e:
                 add_notification(f"{site_key}投稿成功だがJSON解析エラー: {e}", "warning", project_key)
-                return site_config['url']
+                return base_url
         elif response.status_code == 401:
             add_notification(f"{site_key}認証エラー(401)", "error", project_key)
         elif response.status_code == 403:
@@ -1376,4 +1385,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
