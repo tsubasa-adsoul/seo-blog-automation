@@ -344,6 +344,137 @@ def show_notifications():
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ========================
+# アイキャッチ画像自動生成関数
+# ========================
+def create_eyecatch_image(title: str, site_key: str) -> bytes:
+    """タイトルからアイキャッチ画像を自動生成（サイト別対応）"""
+    
+    # 画像サイズ
+    width, height = 600, 400
+    
+    # カラーパレット
+    color_schemes = [
+        {'bg': '#2E7D32', 'accent': '#66BB6A', 'text': '#FFFFFF'},  # 緑×薄緑
+        {'bg': '#388E3C', 'accent': '#81C784', 'text': '#FFFFFF'},  # 深緑×ライトグリーン
+        {'bg': '#4CAF50', 'accent': '#8BC34A', 'text': '#FFFFFF'},  # ミドルグリーン×黄緑
+        {'bg': '#689F38', 'accent': '#AED581', 'text': '#FFFFFF'},  # オリーブグリーン×薄黄緑
+        {'bg': '#7CB342', 'accent': '#C5E1A5', 'text': '#2E7D32'},  # 黄緑×薄緑（文字は緑）
+    ]
+    
+    scheme = random.choice(color_schemes)
+    
+    # 画像作成
+    img = Image.new('RGB', (width, height), color=scheme['bg'])
+    draw = ImageDraw.Draw(img)
+    
+    # 背景にグラデーション効果（簡易版）
+    for i in range(height):
+        alpha = i / height
+        r = int(int(scheme['bg'][1:3], 16) * (1 - alpha * 0.3))
+        g = int(int(scheme['bg'][3:5], 16) * (1 - alpha * 0.3))
+        b = int(int(scheme['bg'][5:7], 16) * (1 - alpha * 0.3))
+        draw.rectangle([(0, i), (width, i + 1)], fill=(r, g, b))
+    
+    # 装飾的な図形を追加
+    # 左上の円
+    draw.ellipse([-50, -50, 150, 150], fill=scheme['accent'])
+    # 右下の円
+    draw.ellipse([width-100, height-100, width+50, height+50], fill=scheme['accent'])
+    
+    # フォント設定
+    try:
+        # メイリオボールド（太字）で統一
+        title_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 28)
+        subtitle_font = ImageFont.truetype("C:/Windows/Fonts/meiryob.ttc", 20)
+    except:
+        # フォールバック（通常のメイリオ）
+        try:
+            title_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 28)
+            subtitle_font = ImageFont.truetype("C:/Windows/Fonts/meiryo.ttc", 20)
+        except:
+            title_font = ImageFont.load_default()
+            subtitle_font = ImageFont.load_default()
+    
+    # タイトルを描画（改行対応）
+    lines = []
+    if len(title) > 12:
+        # まず「！」や「？」で区切れるか確認
+        for sep in ['！', '？', '…', '!', '?']:
+            if sep in title:
+                idx = title.find(sep)
+                if idx > 0:
+                    lines = [title[:idx+1], title[idx+1:].strip()]
+                    break
+        
+        # 「！」「？」で区切れなかった場合は、句読点や助詞で区切る
+        if not lines:
+            for sep in ['と', '、', 'の', 'は', 'が', 'を', 'に', '…', 'で']:
+                if sep in title:
+                    idx = title.find(sep)
+                    if 5 < idx < len(title) - 5:
+                        lines = [title[:idx], title[idx:]]
+                        break
+        
+        # それでも区切れない場合は中央で分割
+        if not lines:
+            mid = len(title) // 2
+            lines = [title[:mid], title[mid:]]
+    else:
+        lines = [title]
+    
+    # 中央にタイトルを配置
+    y_start = (height - len(lines) * 50) // 2
+    
+    for i, line in enumerate(lines):
+        # テキストサイズを取得
+        try:
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            text_width = bbox[2] - bbox[0]
+        except AttributeError:
+            text_width, _ = draw.textsize(line, font=title_font)
+        
+        x = (width - text_width) // 2
+        y = y_start + i * 50
+        
+        # 影
+        draw.text((x + 2, y + 2), line, font=title_font, fill=(0, 0, 0))
+        # 本体
+        draw.text((x, y), line, font=title_font, fill=scheme['text'])
+    
+    # サイト名の設定（サイトごとに変更）
+    site_names = {
+        'selectadvance': 'Select Advance',
+        'welkenraedt': 'Welkenraedt Online',
+        'ykikaku': 'YK企画',
+        'efdlqjtz': 'EFDLQJTZ',
+        'ncepqvub': 'NCEPQVUB',
+        'kosagi': 'Kosagi',
+        'selectad': 'Select AD',
+        'thrones': 'Thrones'
+    }
+    
+    site_name = site_names.get(site_key, 'Financial Blog')
+    
+    try:
+        bbox = draw.textbbox((0, 0), site_name, font=subtitle_font)
+        text_width = bbox[2] - bbox[0]
+    except AttributeError:
+        text_width, _ = draw.textsize(site_name, font=subtitle_font)
+    
+    x = (width - text_width) // 2
+    draw.text((x, height - 50), site_name, font=subtitle_font, fill=scheme['text'])
+    
+    # 上部ライン
+    draw.rectangle([50, 40, width-50, 42], fill=scheme['text'])
+    
+    # バイトデータとして返す
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='JPEG', quality=90)
+    img_byte_arr.seek(0)
+    
+    return img_byte_arr.getvalue()
+
+# ========================
 # 認証 & シート取得
 # ========================
 @st.cache_resource
@@ -526,7 +657,7 @@ URL: {url}
         raise
 
 # ========================
-# 各プラットフォーム投稿関数（通知システム対応）
+# 各プラットフォーム投稿関数（通知システム対応・リトライ修正版）
 # ========================
 
 # リンク属性強制付与関数（EXE版から移植）
@@ -749,7 +880,7 @@ def post_to_blogger(article: dict, project_key: str = None) -> str:
 
 def post_to_wordpress(article_data: dict, site_key: str, category_name: str = None, 
                       schedule_dt: datetime = None, enable_eyecatch: bool = True, project_key: str = None) -> str:
-    """WordPressに投稿（通知システム対応）"""
+    """WordPressに投稿（シンプル版・リトライ機能なし）"""
     if site_key not in WP_CONFIGS:
         add_notification(f"不明なサイト: {site_key}", "error", project_key)
         return ""
@@ -860,25 +991,47 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             post_data['date'] = schedule_dt.strftime('%Y-%m-%dT%H:%M:%S')
             add_notification(f"予約投稿設定: {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定", "info", project_key)
         
+        # アイキャッチ画像の処理
+        if enable_eyecatch:
+            try:
+                add_notification(f"アイキャッチ画像を生成中... ({site_key})", "info", project_key)
+                eyecatch_data = create_eyecatch_image(article_data['title'], site_key)
+                
+                # WordPress メディアライブラリにアップロード
+                media_endpoint = f"{site_config['url']}wp-json/wp/v2/media"
+                
+                files = {
+                    'file': ('eyecatch.jpg', eyecatch_data, 'image/jpeg')
+                }
+                
+                media_data = {
+                    'title': f"アイキャッチ: {article_data['title'][:30]}...",
+                    'alt_text': article_data['title']
+                }
+                
+                media_response = requests.post(
+                    media_endpoint,
+                    auth=HTTPBasicAuth(site_config['user'], site_config['password']),
+                    files=files,
+                    data=media_data,
+                    timeout=60
+                )
+                
+                if media_response.status_code == 201:
+                    media_info = media_response.json()
+                    post_data['featured_media'] = media_info['id']
+                    add_notification(f"アイキャッチ画像アップロード成功 ({site_key})", "success", project_key)
+                else:
+                    add_notification(f"アイキャッチ画像アップロード失敗 ({site_key}): {media_response.status_code}", "warning", project_key)
+                    
+            except Exception as eyecatch_error:
+                add_notification(f"アイキャッチ画像処理エラー ({site_key}): {str(eyecatch_error)}", "warning", project_key)
+        
         try:
             add_notification(f"{site_key} REST API投稿を開始します", "info", project_key)
             
-            # リトライ機能付きでリクエスト
-            import urllib3
-            from urllib3.util.retry import Retry
-            from requests.adapters import HTTPAdapter
-            
-            session = requests.Session()
-            retry_strategy = Retry(
-                total=3,
-                status_forcelist=[429, 500, 502, 503, 504],
-                method_whitelist=["HEAD", "GET", "OPTIONS", "POST"]
-            )
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            session.mount("http://", adapter)
-            session.mount("https://", adapter)
-            
-            response = session.post(
+            # シンプルなリクエスト（リトライ機能なし）
+            response = requests.post(
                 endpoint,
                 auth=HTTPBasicAuth(site_config['user'], site_config['password']),
                 headers={'Content-Type': 'application/json'},
@@ -887,16 +1040,45 @@ def post_to_wordpress(article_data: dict, site_key: str, category_name: str = No
             )
             
             if response.status_code in (201, 200):
-                post_url = response.json().get('link', '')
-                if schedule_dt and schedule_dt > datetime.now():
-                    add_notification(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定", "success", project_key)
-                else:
-                    add_notification(f"投稿成功 ({site_key}): {post_url}", "success", project_key)
-                return post_url
+                try:
+                    response_data = response.json()
+                    post_url = response_data.get('link', '')
+                    
+                    if schedule_dt and schedule_dt > datetime.now():
+                        add_notification(f"予約投稿成功 ({site_key}): {schedule_dt.strftime('%Y/%m/%d %H:%M')}に公開予定", "success", project_key)
+                    else:
+                        add_notification(f"投稿成功 ({site_key}): {post_url}", "success", project_key)
+                    
+                    return post_url
+                    
+                except json.JSONDecodeError as json_error:
+                    add_notification(f"WordPress投稿成功だがレスポンス解析エラー ({site_key}): {str(json_error)}", "warning", project_key)
+                    return f"{site_config['url']}"
+                    
+            elif response.status_code == 401:
+                add_notification(f"WordPress認証エラー ({site_key}): ユーザー名またはパスワードが間違っています", "error", project_key)
+                return ""
+            elif response.status_code == 403:
+                add_notification(f"WordPress権限エラー ({site_key}): 投稿権限がありません", "error", project_key)
+                return ""
+            elif response.status_code == 404:
+                add_notification(f"WordPress APIエラー ({site_key}): REST APIが無効か、URLが間違っています", "error", project_key)
+                return ""
             else:
-                add_notification(f"WordPress投稿失敗 ({site_key}): HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
+                try:
+                    error_detail = response.json()
+                    error_msg = error_detail.get('message', 'Unknown error')
+                    add_notification(f"WordPress投稿失敗 ({site_key}): HTTP {response.status_code} - {error_msg}", "error", project_key)
+                except:
+                    add_notification(f"WordPress投稿失敗 ({site_key}): HTTP {response.status_code} - {response.text[:300]}", "error", project_key)
                 return ""
                 
+        except requests.exceptions.Timeout:
+            add_notification(f"WordPress投稿タイムアウト ({site_key}): 60秒でタイムアウトしました", "error", project_key)
+            return ""
+        except requests.exceptions.ConnectionError:
+            add_notification(f"WordPress接続エラー ({site_key}): サイトに接続できません", "error", project_key)
+            return ""
         except Exception as e:
             add_notification(f"WordPress投稿エラー ({site_key}): {str(e)}", "error", project_key)
             return ""
