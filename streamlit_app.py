@@ -435,12 +435,12 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     site_names = {
         'selectadvance': '後払いアプリ現金化攻略ブログ',
         'welkenraedt': 'マネーハック365',
-        'ykikaku': 'お金の寺子屋',
-        'efdlqjtz': 'すぐカネサロン',
+        'ykikaku': 'お財布レスキュー',
+        'efdlqjtz': 'キャッシュアドバイザー',
         'ncepqvub': 'あと払いスマートライフ',
         'kosagi': '金欠ブロガーの裏金策帖',
-        'selectad': 'KANE STUDIO',
-        'thrones': 'キャッシュ・アトリエ'
+        'selectad': '買取LIFEサポート',
+        'thrones': 'アセットマネジメント'
     }
     site_name = site_names.get(site_key, 'Financial Blog')
     try:
@@ -691,7 +691,7 @@ def post_to_wordpress(article: dict, site_key: str, category_name: str = None,
     try:
         r = requests.post(f"{cfg['url']}wp-json/wp/v2/posts",
                           auth=HTTPBasicAuth(cfg['user'], cfg['password']),
-                          headers={'Content-Type':'application/json','User-Agent':'streamlit-app'},
+                          headers={'Content-Type':'application/json','User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
                           data=json.dumps(payload), timeout=60, verify=False)
         if r.status_code in (200,201):
             return r.json().get('link','')
@@ -807,18 +807,20 @@ def post_to_livedoor(article: dict, category_name: str = None) -> str:
 def post_to_blogger_local(article: dict, category_name: str = None) -> str:
     """ローカル用のBlogger投稿関数（外部モジュールを呼び出し）"""
     try:
-        # ここでインポートが必要
-        from scripts.blogger_client import post_to_blogger
+        # Blogger Client は必要に応じて動的インポート
         add_realtime_log("📤 Blogger API 呼び出し中...")
         
+        # ラベル（カテゴリ）を配列で準備
         labels = [category_name] if category_name else ["金融"]
         
+        # 外部モジュールのpost_to_blogger関数を呼び出し
+        # 戻り値: (post_url, response_data)
         post_url, response = post_to_blogger(
             title=article["title"],
             html_body=article["content"],
             labels=labels,
-            blog_id=None,
-            schedule_dt=None
+            blog_id=None,  # secrets からの blog_id を使用
+            schedule_dt=None  # 即時投稿
         )
         
         if post_url:
@@ -1389,5 +1391,3 @@ jobs:
 
 if __name__ == "__main__":
     main()
-
-
