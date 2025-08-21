@@ -435,12 +435,12 @@ def create_eyecatch_image(title: str, site_key: str) -> bytes:
     site_names = {
         'selectadvance': '後払いアプリ現金化攻略ブログ',
         'welkenraedt': 'マネーハック365',
-        'ykikaku': 'お財布レスキュー',
-        'efdlqjtz': 'キャッシュアドバイザー',
+        'ykikaku': 'お金の寺子屋',
+        'efdlqjtz': 'すぐカネサロン',
         'ncepqvub': 'あと払いスマートライフ',
         'kosagi': '金欠ブロガーの裏金策帖',
-        'selectad': '買取LIFEサポート',
-        'thrones': 'アセットマネジメント'
+        'selectad': 'KANE STUDIO',
+        'thrones': 'キャッシュ・アトリエ'
     }
     site_name = site_names.get(site_key, 'Financial Blog')
     try:
@@ -1389,4 +1389,5 @@ jobs:
 
 if __name__ == "__main__":
     main()
+
 
