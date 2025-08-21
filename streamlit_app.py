@@ -602,7 +602,11 @@ def upload_image_to_wordpress(image_data: bytes, filename: str, site_config: dic
     safe_filename = ''.join(c for c in filename if c in string.ascii_letters + string.digits + '-_.') or f"eyecatch_{int(time.time())}.jpg"
     if not safe_filename.endswith('.jpg'):
         safe_filename += '.jpg'
-    headers = {'Content-Disposition': f'attachment; filename="{safe_filename}"','Content-Type': 'image/jpeg'}
+    headers = {
+        'Content-Disposition': f'attachment; filename="{safe_filename}"',
+        'Content-Type': 'image/jpeg',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
     try:
         r = requests.post(media_endpoint, data=image_data, headers=headers,
                           auth=HTTPBasicAuth(site_config['user'], site_config['password']),
@@ -615,7 +619,9 @@ def get_category_id(site_config, category_name):
     if not category_name:
         return None
     try:
-        r = requests.get(f"{site_config['url']}wp-json/wp/v2/categories", timeout=30, verify=False)
+        r = requests.get(f"{site_config['url']}wp-json/wp/v2/categories", 
+                         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
+                         timeout=30, verify=False)
         if r.status_code == 200:
             for cat in r.json():
                 if cat['name'] == category_name:
@@ -713,6 +719,7 @@ def test_wordpress_connection(site_key):
             st.success("kosagi 接続成功 (XML-RPC)"); return True
         r = requests.get(f"{cfg['url']}wp-json/wp/v2/users/me",
                          auth=HTTPBasicAuth(cfg['user'], cfg['password']),
+                         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
                          timeout=15, verify=False)
         if r.status_code == 200:
             st.success("✅ 接続成功"); return True
